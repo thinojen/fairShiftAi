@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approvalCodeMatches, AttemptLimiter, isAllowlistedRecipient, payoutAvailability } from "@/lib/payouts/approval";
+import { approvalCodeMatches, AttemptLimiter, authorisePayout, isAllowlistedRecipient, payoutAvailability } from "@/lib/payouts/approval";
 
 const ready = {
   PAYOUTS_ENABLED: "true",
@@ -57,5 +57,30 @@ describe("recipient allowlist", () => {
   it("is case-insensitive", () => {
     expect(isAllowlistedRecipient("Sam@X.com", { PAYPAL_SANDBOX_RECIPIENTS: "sam@x.com, p@x.com" })).toBe(true);
     expect(isAllowlistedRecipient("z@x.com", { PAYPAL_SANDBOX_RECIPIENTS: "sam@x.com" })).toBe(false);
+  });
+});
+
+describe("authorisePayout — the only payout gate", () => {
+  const fresh = () => new AttemptLimiter();
+  const base = { approvalCode: "correct-horse-battery", confirmedReviewed: true, clientKey: "ip" };
+
+  it("public demo (PAYOUTS_ENABLED unset/false) refuses even the correct code", () => {
+    for (const PAYOUTS_ENABLED of [undefined, "false", "TRUE", "yes"]) {
+      const r = authorisePayout({ ...base, env: { ...ready, PAYOUTS_ENABLED }, limiter: fresh() });
+      expect(r.authorised).toBe(false);
+    }
+  });
+
+  it("needs the correct code and the review confirmation", () => {
+    expect(authorisePayout({ ...base, approvalCode: "wrong", env: ready, limiter: fresh() }).authorised).toBe(false);
+    expect(authorisePayout({ ...base, confirmedReviewed: false, env: ready, limiter: fresh() }).authorised).toBe(false);
+    expect(authorisePayout({ ...base, env: ready, limiter: fresh() }).authorised).toBe(true);
+  });
+
+  it("rate-limits before checking the code, so guessing is capped", () => {
+    const lim = fresh();
+    for (let i = 0; i < 5; i++) authorisePayout({ ...base, approvalCode: "guess" + i, env: ready, limiter: lim });
+    const r = authorisePayout({ ...base, env: ready, limiter: lim }); // even the right code is now blocked
+    expect(r).toMatchObject({ authorised: false, message: expect.stringMatching(/Too many/) });
   });
 });

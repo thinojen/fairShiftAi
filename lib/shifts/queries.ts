@@ -161,6 +161,7 @@ export async function getDashboardSummary(db: Db) {
         id: s.payouts.id,
         amountPence: s.payouts.amountPence,
         status: s.payouts.status,
+        reconciliationIssue: s.payouts.reconciliationIssue,
         updatedAt: s.payouts.updatedAt,
         workerName: s.workers.name,
         shiftId: s.payoutBatches.shiftId,
@@ -180,7 +181,8 @@ export async function getDashboardSummary(db: Db) {
       openShifts: shifts.filter((x) => x.status === "open").length,
       awaitingPayout: shifts.filter((x) => x.status === "closed" && !x.batchStatus).length,
       uncoveredSlots: shifts.reduce((n, x) => n + x.uncoveredCount, 0),
-      paidPence: payouts.filter((p) => p.status === "success").reduce((n, p) => n + p.amountPence, 0),
+      // Only items PayPal reports as SUCCESS *and* that reconcile exactly.
+      paidPence: payouts.filter((p) => p.status === "success" && !p.reconciliationIssue).reduce((n, p) => n + p.amountPence, 0),
     },
   };
 }

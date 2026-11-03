@@ -52,6 +52,7 @@ const STATUS_LABEL: Record<string, string> = {
   blocked: "Blocked",
   refunded: "Refunded",
   reversed: "Reversed",
+  review: "Needs review",
 };
 
 export function AllocationGrid({ rows, totalPoints, showPayout }: { rows: AllocationRow[]; totalPoints: number; showPayout?: boolean }) {
@@ -92,7 +93,7 @@ export function AllocationGrid({ rows, totalPoints, showPayout }: { rows: Alloca
         valueFormatter: (p) => (p.value ? (STATUS_LABEL[p.value] ?? p.value) : "—"),
         cellClassRules: {
           "text-success font-medium": (p) => p.value === "success",
-          "text-destructive font-medium": (p) => ["failed", "returned", "blocked", "refunded", "reversed"].includes(p.value),
+          "text-destructive font-medium": (p) => ["failed", "returned", "blocked", "refunded", "reversed", "review"].includes(p.value),
           "text-warning font-medium": (p) => ["unclaimed", "onhold"].includes(p.value),
         },
       });

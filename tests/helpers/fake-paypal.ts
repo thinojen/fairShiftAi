@@ -12,6 +12,7 @@ export function createFakePayPal() {
   const byRequestId = new Map<string, string>();
   let failNextCreate: "network" | "500" | "422" | null = null;
   let createCalls = 0;
+  const tampers = new Map<string, (res: Record<string, any>) => void>(); // eslint-disable-line @typescript-eslint/no-explicit-any
 
   const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const u = String(url);
@@ -52,15 +53,17 @@ export function createFakePayPal() {
     if (method === "GET" && m) {
       const b = batches.get(decodeURIComponent(m[1]));
       if (!b) return Response.json({ name: "RESOURCE_NOT_FOUND" }, { status: 404 });
-      return Response.json({
+      const body = {
         batch_header: { payout_batch_id: b.id, batch_status: b.status, sender_batch_header: { sender_batch_id: b.senderBatchId } },
         items: b.items.map((it, i) => ({
           payout_item_id: `${b.id}-I${i}`,
           transaction_id: (b.itemStatus[it.sender_item_id] ?? "PENDING") === "SUCCESS" ? `TX${i}` : undefined,
           transaction_status: b.itemStatus[it.sender_item_id] ?? "PENDING",
-          payout_item: it,
+          payout_item: structuredClone(it),
         })),
-      });
+      };
+      tampers.get(b.id)?.(body);
+      return Response.json(body);
     }
     return Response.json({ name: "NOT_IMPLEMENTED", message: u }, { status: 501 });
   });
@@ -73,6 +76,10 @@ export function createFakePayPal() {
     },
     failNextCreate(kind: "network" | "500" | "422") {
       failNextCreate = kind;
+    },
+    /** Make PayPal's GET response for a batch disagree with our records (for tests). */
+    tamper(batchId: string, fn: (res: Record<string, any>) => void) { // eslint-disable-line @typescript-eslint/no-explicit-any
+      tampers.set(batchId, fn);
     },
     /** Set PayPal-side statuses: batch status + per-item status keyed by sender_item_id. */
     settle(batchId: string, batchStatus: string, items: Record<string, string> | ((senderItemId: string) => string)) {

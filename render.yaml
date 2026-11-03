@@ -1,0 +1,29 @@
+# Render Blueprint for the PUBLIC FairShift demo.
+# Payouts are switched OFF here by design. MANAGER_APPROVAL_CODE is deliberately
+# NOT listed: the public service must never be able to authorise a payout.
+services:
+  - type: web
+    name: fairshift-ai
+    runtime: node
+    region: frankfurt # closest Render region to the UK
+    plan: free
+    # --include=dev: the build needs TypeScript/Tailwind even if NODE_ENV=production
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # ---- payout safety (public demo) ----
+      - key: PAYOUTS_ENABLED
+        value: "false"
+      - key: PAYOUT_MAX_ITEM_PENCE
+        value: "30000"
+      - key: PAYOUT_MAX_BATCH_PENCE
+        value: "100000"
+      # ---- secrets: Render asks for these when you create the Blueprint ----
+      - key: DATABASE_URL
+        sync: false
+      - key: PAYPAL_SANDBOX_RECIPIENTS
+        sync: false

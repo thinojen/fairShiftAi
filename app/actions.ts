@@ -14,7 +14,7 @@ import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db/client";
 import { DEMO_ROLES, getDemoRole, ROLE_COOKIE } from "@/lib/demo/role";
 import { fromLondonLocalInput } from "@/lib/format";
-import { approvalCodeMatches, approvalLimiter, payoutAvailability } from "@/lib/payouts/approval";
+import { authorisePayout } from "@/lib/payouts/approval";
 import { paypalGateway } from "@/lib/payouts/gateway";
 import { PayoutError, refreshShiftPayoutStatus, requestShiftPayout } from "@/lib/payouts/service";
 import { assertPayoutAllowed, getPayPal, PayPalApiError } from "@/lib/paypal/server";
@@ -100,19 +100,14 @@ export async function approvePayoutAction(_prev: ActionResult, formData: FormDat
   const denied = await managerOnly();
   if (denied) return denied;
 
-  const availability = payoutAvailability();
-  if (!availability.enabled) return { ok: false, tone: "warning", message: availability.reason };
-
-  const limit = approvalLimiter.tryConsume(await clientKey());
-  if (!limit.allowed) {
-    return { ok: false, tone: "error", message: `Too many approval attempts. Try again in ${Math.ceil(limit.retryAfterSec / 60)} min.` };
-  }
-  if (!approvalCodeMatches(String(formData.get("approvalCode") ?? ""))) {
-    return { ok: false, tone: "error", message: "Approval code is incorrect. Nothing was sent." };
-  }
-  if (formData.get("confirmReviewed") !== "on") {
-    return { ok: false, tone: "error", message: "Confirm you have reviewed the allocation." };
-  }
+  // The role check above only decides which UI is allowed to ask. Authorisation
+  // itself ignores the role entirely — see authorisePayout().
+  const auth = authorisePayout({
+    approvalCode: String(formData.get("approvalCode") ?? ""),
+    confirmedReviewed: formData.get("confirmReviewed") === "on",
+    clientKey: await clientKey(),
+  });
+  if (!auth.authorised) return { ok: false, tone: auth.tone, message: auth.message };
 
   try {
     const { client, cfg } = getPayPal();

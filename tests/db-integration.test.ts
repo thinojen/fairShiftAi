@@ -2,7 +2,7 @@
  * Database integration tests on PGlite with the real migrations + seed.
  * These prove SQL/constraints/flows, NOT that live Supabase works.
  */
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "@/lib/db/connect";
 import * as s from "@/lib/db/schema";
@@ -303,5 +303,152 @@ describe("payout status reconciliation", () => {
     await refresh();
     const d = await getDashboardSummary(db);
     expect(d.counts.paidPence).toBe(rows[0].amountPence);
+  });
+});
+
+describe("payment history is permanent", () => {
+  async function withPayout() {
+    await saveAllocation(db, FRI1, MANAGER);
+    const out = await requestShiftPayout(db, gateway, { shiftId: FRI1, actor: MANAGER, validate });
+    if (out.kind !== "accepted") throw new Error("expected accepted");
+    return out;
+  }
+
+  it("reseeding is refused once any payout exists, and nothing is deleted", async () => {
+    await withPayout();
+    const before = {
+      batches: (await db.select().from(s.payoutBatches)).length,
+      payouts: (await db.select().from(s.payouts)).length,
+      audit: (await db.select().from(s.auditLog)).length,
+      allocations: (await db.select().from(s.allocations)).length,
+    };
+    await expect(seedDemo(db, { recipientsCsv: TEST_RECIPIENTS.join(",") })).rejects.toThrow(/Refusing to reseed/);
+    expect((await db.select().from(s.payoutBatches)).length).toBe(before.batches);
+    expect((await db.select().from(s.payouts)).length).toBe(before.payouts);
+    expect((await db.select().from(s.auditLog)).length).toBe(before.audit);
+    expect((await db.select().from(s.allocations)).length).toBe(before.allocations);
+  });
+
+  it("reseeding without payments keeps (and appends to) the audit log", async () => {
+    await fixSam();
+    const before = (await db.select().from(s.auditLog)).length;
+    await seedDemo(db, { recipientsCsv: TEST_RECIPIENTS.join(",") });
+    const after = await db.select().from(s.auditLog);
+    expect(after.length).toBe(before + 1);
+    expect(after.some((a) => a.action === "hours.corrected")).toBe(true);
+  });
+
+  it("the database itself rejects DELETE and TRUNCATE of payment and audit rows", async () => {
+    await withPayout();
+    await expect(db.delete(s.payouts)).rejects.toThrow();
+    await expect(db.delete(s.payoutBatches)).rejects.toThrow();
+    await expect(db.delete(s.auditLog)).rejects.toThrow();
+    await expect(db.execute(sql`TRUNCATE payouts CASCADE`)).rejects.toThrow();
+    await expect(db.execute(sql`TRUNCATE audit_log`)).rejects.toThrow();
+    // Deleting the shift, venue or worker can't cascade into payment history either.
+    await expect(db.delete(s.shifts).where(eq(s.shifts.id, FRI1))).rejects.toThrow();
+    await expect(db.delete(s.venues)).rejects.toThrow();
+    await expect(db.delete(s.workers).where(eq(s.workers.id, "w_sam"))).rejects.toThrow();
+    expect((await db.select().from(s.payouts)).length).toBe(4);
+  });
+
+  it("updates (status reconciliation) are still allowed", async () => {
+    const out = await withPayout();
+    fake.settle(out.paypalBatchId, "SUCCESS", () => "SUCCESS");
+    await expect(refreshShiftPayoutStatus(db, gateway, { shiftId: FRI1, actor: MANAGER })).resolves.toMatchObject({ allPaid: true });
+  });
+});
+
+describe("reconciliation checks amounts, currency, recipient and batch identity", () => {
+  const refresh = () => refreshShiftPayoutStatus(db, gateway, { shiftId: FRI1, actor: MANAGER });
+  async function settledBatch() {
+    await saveAllocation(db, FRI1, MANAGER);
+    const out = await requestShiftPayout(db, gateway, { shiftId: FRI1, actor: MANAGER, validate });
+    if (out.kind !== "accepted") throw new Error("expected accepted");
+    fake.settle(out.paypalBatchId, "SUCCESS", () => "SUCCESS");
+    const samItem = (await db.select().from(s.payouts).where(eq(s.payouts.workerId, "w_sam")))[0].senderItemId;
+    return { out, samItem };
+  }
+  const editSam = (samItem: string, edit: (it: Record<string, any>) => void) => (res: Record<string, any>) => // eslint-disable-line @typescript-eslint/no-explicit-any
+    res.items.filter((i: { payout_item: { sender_item_id: string } }) => i.payout_item.sender_item_id === samItem).forEach(edit);
+
+  it("stores the exact recipient on each payout row", async () => {
+    await settledBatch();
+    const sam = (await db.select().from(s.payouts).where(eq(s.payouts.workerId, "w_sam")))[0];
+    expect(sam.receiverEmail).toBe(TEST_RECIPIENTS[0]);
+    expect(sam.amountPence).toBe(26646);
+  });
+
+  it("an amount mismatch is never counted as paid", async () => {
+    const { out, samItem } = await settledBatch();
+    fake.tamper(out.paypalBatchId, editSam(samItem, (it) => (it.payout_item.amount.value = "266.47")));
+    const r = await refresh();
+    const sam = r.items.find((p) => p.workerId === "w_sam")!;
+    expect(sam.status).toBe("success"); // PayPal's status is mirrored…
+    expect(sam.reconciliationIssue).toMatch(/Amount mismatch: PayPal 266.47, expected 266.46/); // …but flagged
+    expect(r.allPaid).toBe(false);
+    expect((await getShiftReview(db, FRI1))!.shift.status).toBe("closed");
+    expect((await getDashboardSummary(db)).counts.paidPence).toBe(64000 - 26646);
+  });
+
+  it("flags currency and recipient mismatches", async () => {
+    const { out, samItem } = await settledBatch();
+    fake.tamper(out.paypalBatchId, editSam(samItem, (it) => {
+      it.payout_item.amount.currency = "USD";
+      it.payout_item.receiver = "someone-else@example.com";
+    }));
+    const sam = (await refresh()).items.find((p) => p.workerId === "w_sam")!;
+    expect(sam.reconciliationIssue).toMatch(/Currency mismatch/);
+    expect(sam.reconciliationIssue).toMatch(/Recipient mismatch/);
+  });
+
+  it("clears the issue once PayPal's record matches again", async () => {
+    const { out, samItem } = await settledBatch();
+    fake.tamper(out.paypalBatchId, editSam(samItem, (it) => (it.payout_item.amount.value = "1.00")));
+    expect((await refresh()).allPaid).toBe(false);
+    fake.tamper(out.paypalBatchId, () => {});
+    expect((await refresh()).allPaid).toBe(true);
+  });
+
+  it("refuses to apply a response for a different batch", async () => {
+    const { out } = await settledBatch();
+    fake.tamper(out.paypalBatchId, (res) => (res.batch_header.sender_batch_header.sender_batch_id = "someone-elses-batch"));
+    await expect(refresh()).rejects.toMatchObject({ code: "reconciliation" });
+    expect((await db.select().from(s.payouts)).every((p) => p.status === "pending")).toBe(true);
+  });
+
+  it("surfaces unknown and duplicate items instead of ignoring them", async () => {
+    const { out, samItem } = await settledBatch();
+    fake.tamper(out.paypalBatchId, (res) => {
+      const sam = res.items.find((i: { payout_item: { sender_item_id: string } }) => i.payout_item.sender_item_id === samItem);
+      res.items.push(structuredClone(sam));
+      res.items.push({ ...structuredClone(sam), payout_item_id: "STRANGER", payout_item: { ...sam.payout_item, sender_item_id: "not-ours" } });
+    });
+    const r = await refresh();
+    expect(r.unknownItems).toEqual(["STRANGER"]);
+    expect(r.duplicateIds).toEqual([samItem]);
+    expect(r.allPaid).toBe(false);
+    expect(r.items.find((p) => p.workerId === "w_sam")!.reconciliationIssue).toMatch(/more than once/);
+    expect((await db.select().from(s.payoutBatches))[0].lastError).toMatch(/never sent/);
+  });
+
+  it("reports our items that PayPal doesn't list yet, leaving them pending", async () => {
+    const { out, samItem } = await settledBatch();
+    fake.tamper(out.paypalBatchId, (res) => (res.items = res.items.filter((i: { payout_item: { sender_item_id: string } }) => i.payout_item.sender_item_id !== samItem)));
+    const r = await refresh();
+    expect(r.missingFromPayPal).toHaveLength(1);
+    expect(r.items.find((p) => p.workerId === "w_sam")!.status).toBe("pending");
+    expect(r.allPaid).toBe(false);
+  });
+
+  it("a retry sends the stored recipient even if the worker's email changed since", async () => {
+    await saveAllocation(db, FRI1, MANAGER);
+    fake.failNextCreate("network");
+    await requestShiftPayout(db, gateway, { shiftId: FRI1, actor: MANAGER, validate });
+    await db.update(s.workers).set({ paypalEmail: TEST_RECIPIENTS[4] }).where(eq(s.workers.id, "w_sam"));
+    const out = await requestShiftPayout(db, gateway, { shiftId: FRI1, actor: MANAGER, validate });
+    expect(out.kind).toBe("accepted");
+    const sent = [...fake.batches.values()][0].items.map((i) => i.receiver);
+    expect(sent).toContain(TEST_RECIPIENTS[0]);
   });
 });

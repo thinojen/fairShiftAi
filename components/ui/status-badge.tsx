@@ -13,7 +13,8 @@ const PAYOUT: Record<string, { label: string; variant: "success" | "warning" | "
   reversed: { label: "Reversed", variant: "destructive" },
 };
 
-export function PayoutStatusBadge({ status }: { status: string }) {
+export function PayoutStatusBadge({ status, issue }: { status: string; issue?: string | null }) {
+  if (issue) return <Badge variant="destructive" title={issue}>Needs review</Badge>;
   const s = PAYOUT[status] ?? { label: status, variant: "outline" as const };
   return <Badge variant={s.variant}>{s.label}</Badge>;
 }

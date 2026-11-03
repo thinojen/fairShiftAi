@@ -43,7 +43,7 @@ async function ShiftDetail({ params }: { params: PageProps<"/manager/shifts/[id]
   const warnings = r.flags.filter((f) => f.severity === "warning");
   const locked = shift.status !== "open";
   const batch = r.batch;
-  const payoutStatusByWorker = new Map(r.payouts.map((p) => [p.workerId, p.status]));
+  const payoutStatusByWorker = new Map(r.payouts.map((p) => [p.workerId, p.reconciliationIssue ? "review" : p.status]));
 
   // Rows: saved allocation once locked; otherwise the live preview.
   let rows: AllocationRow[] = [];
@@ -220,7 +220,8 @@ async function ShiftDetail({ params }: { params: PageProps<"/manager/shifts/[id]
                     <li key={p.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5 text-sm">
                       <span className="min-w-28 flex-1 font-medium">{p.workerName}</span>
                       <span className="tabular-nums">{formatGBP(p.amountPence)}</span>
-                      <PayoutStatusBadge status={p.status} />
+                      <PayoutStatusBadge status={p.status} issue={p.reconciliationIssue} />
+                      {p.reconciliationIssue && <span className="text-destructive w-full text-xs">{p.reconciliationIssue}</span>}
                       {p.errorMessage && <span className="text-destructive w-full text-xs">{p.errorMessage}</span>}
                       {(p.status === "unclaimed" || p.status === "failed") && (
                         <span className="text-muted-foreground w-full text-xs">

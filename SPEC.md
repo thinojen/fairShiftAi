@@ -186,3 +186,10 @@ Changes made during implementation. Each is additive or a representation detail;
 13. **Payout authorisation** (replaces "manager clicks Approve & Pay" in §2): requires `PAYOUTS_ENABLED=true`, a server-checked `MANAGER_APPROVAL_CODE` (≥ 12 chars, constant-time compare), and an attempt rate limit (5 per client / 20 global per 15 min, in-memory). The demo role cookie only controls which views are shown.
 14. **Re-verification before paying.** The saved allocation must equal a fresh engine run on current data, and all PayPal guards (allowlist, per-item cap, batch total) run before anything is persisted.
 15. **Status reconciliation** is manual ("Refresh status", via GET payout batch) in M2. Webhook-driven reconciliation is scheduled for M3 once there is a public URL.
+
+**Pre-deploy (3 Nov 2026)**
+16. **Payment history is permanent.** `payout_batches`, `payouts`, `pay_queries` and `audit_log` cannot be deleted or truncated: foreign keys into them use `ON DELETE RESTRICT`, and database triggers (`0003_protect_payment_history.sql`, a Drizzle custom migration) reject DELETE/TRUNCATE. Updates (status reconciliation) are allowed. The seed refuses to run if any payout batch, payout or pay query exists, and never deletes the audit log or webhook events.
+17. **Payout rows record the exact recipient** (`payouts.receiver_email`). Retries send exactly the persisted amounts and recipients.
+18. **Stricter reconciliation.** PayPal's response must be for our batch (PayPal batch id and sender_batch_id). Each item is checked for amount, currency (GBP) and recipient; any mismatch is stored in `payouts.reconciliation_issue` and the item is shown as "Needs review", never as paid. Unknown, duplicate and missing items are surfaced. A shift is `paid` only when every item is SUCCESS with no issue.
+19. **Single payout gate.** `authorisePayout()` (lib/payouts/approval.ts) is the only authorisation check. Its inputs do not include the demo role.
+20. **Deployment.** Render Blueprint (`render.yaml`): Node 22, Frankfurt, `PAYOUTS_ENABLED=false`, no `MANAGER_APPROVAL_CODE` on the public service. Liveness at `/api/health`.

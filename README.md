@@ -46,6 +46,28 @@ This is a hackathon demo, not production software.
 - **The approval rate limiter is in-memory** (fine for one server instance; resets on restart).
 - **Webhook processing is incomplete** (see status above).
 
+## Deploying to Render
+The repo includes a Render Blueprint (`render.yaml`) for the **public demo**: payouts are switched off, and no approval code is configured. See the step-by-step guide in this README's "Render step by step" section below.
+
+| Variable | Public demo value | Notes |
+|---|---|---|
+| `DATABASE_URL` | Supabase **session pooler** URI (port 5432) | secret |
+| `PAYPAL_SANDBOX_RECIPIENTS` | your 5 sandbox emails, comma-separated | only used to label allowlisted staff |
+| `PAYOUTS_ENABLED` | `false` | set by the Blueprint |
+| `PAYOUT_MAX_ITEM_PENCE` / `PAYOUT_MAX_BATCH_PENCE` | `30000` / `100000` | set by the Blueprint |
+| `NODE_VERSION` | `22` | set by the Blueprint |
+| `MANAGER_APPROVAL_CODE` | **do not set** | the public demo must not be able to pay |
+| `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET` | not needed yet | added in Milestone 3 for webhooks |
+
+### Render step by step
+1. Sign in at [render.com](https://render.com) with GitHub.
+2. **New → Blueprint**, pick the `fairShiftAi` repository, and confirm the `render.yaml` it finds.
+3. Render asks for the two secret values: paste `DATABASE_URL` and `PAYPAL_SANDBOX_RECIPIENTS`. Click **Apply**.
+4. Wait for the build (a few minutes). When the service shows **Live**, open its `…onrender.com` URL.
+5. Check `…onrender.com/api/health` shows `"payoutsEnabled": false`.
+
+The free plan sleeps after inactivity, so the first page load can take up to a minute.
+
 ## For judges: running sandbox payouts yourself
 The public demo has payouts disabled, and the approval code is never published. To try real sandbox payouts, run your own copy:
 1. In the [PayPal Developer dashboard](https://developer.paypal.com) (Sandbox), create an app with **Payouts** enabled and 5 sandbox *personal* accounts.

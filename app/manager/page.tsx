@@ -126,7 +126,7 @@ async function Overview() {
                       <p className="text-muted-foreground text-xs">{formatDateTime(p.updatedAt)}</p>
                     </div>
                     <span className="text-sm tabular-nums">{formatGBP(p.amountPence)}</span>
-                    <PayoutStatusBadge status={p.status} />
+                    <PayoutStatusBadge status={p.status} issue={p.reconciliationIssue} />
                   </li>
                 ))}
               </ul>

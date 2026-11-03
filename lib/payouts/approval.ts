@@ -76,3 +76,37 @@ export function isAllowlistedRecipient(email: string, env: Env = process.env): b
   const list = (env.PAYPAL_SANDBOX_RECIPIENTS ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
   return list.includes(email.trim().toLowerCase());
 }
+
+export type PayoutAuthorisation =
+  | { authorised: true }
+  | { authorised: false; tone: "warning" | "error"; message: string };
+
+/**
+ * The ONLY gate in front of a payout. Note what it does NOT take: the demo role
+ * cookie. Choosing "Manager" in the role switcher grants nothing here — a
+ * payout needs payouts enabled on the server, a correct approval code, an
+ * attempt within the rate limit, and the reviewed confirmation.
+ */
+export function authorisePayout(input: {
+  approvalCode: string;
+  confirmedReviewed: boolean;
+  clientKey: string;
+  env?: Env;
+  limiter?: AttemptLimiter;
+}): PayoutAuthorisation {
+  const env = input.env ?? process.env;
+  const availability = payoutAvailability(env);
+  if (!availability.enabled) return { authorised: false, tone: "warning", message: availability.reason };
+
+  const limit = (input.limiter ?? approvalLimiter).tryConsume(input.clientKey);
+  if (!limit.allowed) {
+    return { authorised: false, tone: "error", message: `Too many approval attempts. Try again in ${Math.ceil(limit.retryAfterSec / 60)} min.` };
+  }
+  if (!approvalCodeMatches(input.approvalCode, env)) {
+    return { authorised: false, tone: "error", message: "Approval code is incorrect. Nothing was sent." };
+  }
+  if (!input.confirmedReviewed) {
+    return { authorised: false, tone: "error", message: "Confirm you have reviewed the allocation." };
+  }
+  return { authorised: true };
+}

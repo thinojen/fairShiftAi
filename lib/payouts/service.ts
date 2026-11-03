@@ -25,10 +25,10 @@ import { randomBytes } from "node:crypto";
 import { and, eq, inArray, lt, or } from "drizzle-orm";
 import type { Db } from "../db/connect";
 import * as s from "../db/schema";
-import { decimalStringToPence } from "../money";
+import { CURRENCY, decimalStringToPence, penceToDecimalString } from "../money";
 import { PayPalApiError } from "../paypal/client";
 import { PayoutGuardError, type PayoutItemInput } from "../paypal/guards";
-import { mapBatchStatus, mapItemStatus } from "../paypal/payouts";
+import { mapBatchStatus, mapItemStatus, type PayoutItemDetails } from "../paypal/payouts";
 import { allocateTips } from "../tips/engine";
 import { policyForDate } from "../tips/policy";
 import { toEngineAssignments } from "../shifts/queries";
@@ -38,7 +38,14 @@ export class PayoutError extends Error {
   name = "PayoutError";
   constructor(
     message: string,
-    readonly code: "not_ready" | "stale_allocation" | "nothing_to_pay" | "in_progress" | "already_sent" | "guard" | "not_found",
+    readonly code: | "not_ready"
+      | "stale_allocation"
+      | "nothing_to_pay"
+      | "in_progress"
+      | "already_sent"
+      | "guard"
+      | "not_found"
+      | "reconciliation",
   ) {
     super(message);
   }
@@ -133,6 +140,7 @@ async function prepareAndClaim(
         workerId: a.workerId,
         allocationId: a.id,
         amountPence: a.sharePence,
+        receiverEmail: items[i].receiverEmail,
         senderItemId: items[i].senderItemId,
         status: "pending" as const,
       })),
@@ -165,15 +173,11 @@ async function prepareAndClaim(
     .returning();
   if (!claimed) throw new PayoutError("A payout request for this shift is already in progress", "in_progress");
 
+  // Send EXACTLY what was persisted (amounts and recipients) — never re-derive.
   const payoutRows = await tx.select().from(s.payouts).where(eq(s.payouts.batchId, claimed.id));
-  const workers = await tx
-    .select({ id: s.workers.id, email: s.workers.paypalEmail })
-    .from(s.workers)
-    .where(inArray(s.workers.id, payoutRows.map((p) => p.workerId)));
-  const emailOf = new Map(workers.map((w) => [w.id, w.email]));
   const items: PayoutItemInput[] = payoutRows.map((p) => ({
     senderItemId: p.senderItemId,
-    receiverEmail: emailOf.get(p.workerId) ?? "",
+    receiverEmail: p.receiverEmail,
     amountPence: p.amountPence,
     note: `FairShift tips · ${shift.date} ${shift.service}`,
   }));
@@ -237,10 +241,60 @@ export async function requestShiftPayout(
   }
 }
 
+export type ReconcileRow = Pick<
+  typeof s.payouts.$inferSelect,
+  "id" | "senderItemId" | "amountPence" | "receiverEmail" | "status" | "paypalItemId" | "paypalTransactionId" | "errorMessage" | "reconciliationIssue"
+>;
+
 /**
- * Reconcile with PayPal's real per-item statuses. Idempotent: mirrors whatever
- * PayPal reports; running it twice changes nothing the second time. A worker is
- * only "paid" when THEIR item reports SUCCESS.
+ * Pure comparison of one PayPal item against our record. PayPal's status is
+ * mirrored as reported, but any disagreement in amount, currency or recipient
+ * is recorded as a reconciliation issue — and an item with an issue is never
+ * counted as paid.
+ */
+export function reconcileItem(row: ReconcileRow, item: PayoutItemDetails) {
+  const issues: string[] = [];
+  let paypalPence: number | null = null;
+  try {
+    paypalPence = decimalStringToPence(item.payout_item.amount.value);
+  } catch {
+    issues.push(`PayPal amount "${item.payout_item.amount.value}" is not a valid amount`);
+  }
+  if (paypalPence !== null && paypalPence !== row.amountPence) {
+    issues.push(`Amount mismatch: PayPal ${penceToDecimalString(paypalPence)}, expected ${penceToDecimalString(row.amountPence)}`);
+  }
+  if (item.payout_item.amount.currency !== CURRENCY) {
+    issues.push(`Currency mismatch: PayPal ${item.payout_item.amount.currency}, expected ${CURRENCY}`);
+  }
+  if (item.payout_item.receiver.trim().toLowerCase() !== row.receiverEmail.trim().toLowerCase()) {
+    issues.push("Recipient mismatch: PayPal paid a different account than the one approved");
+  }
+  const next = {
+    status: mapItemStatus(item.transaction_status),
+    paypalItemId: item.payout_item_id,
+    paypalTransactionId: item.transaction_id ?? null,
+    errorMessage: item.errors?.message ? `${item.errors.name ?? ""} ${item.errors.message}`.trim() : null,
+    reconciliationIssue: issues.length ? issues.join("; ") : null,
+  };
+  const changed =
+    row.status !== next.status ||
+    row.paypalItemId !== next.paypalItemId ||
+    row.paypalTransactionId !== next.paypalTransactionId ||
+    row.errorMessage !== next.errorMessage ||
+    row.reconciliationIssue !== next.reconciliationIssue;
+  return { next, changed };
+}
+
+/** A worker counts as paid only if PayPal says SUCCESS and the record matches. */
+export function isConfirmedPaid(p: { status: string; reconciliationIssue: string | null }) {
+  return p.status === "success" && !p.reconciliationIssue;
+}
+
+/**
+ * Reconcile with PayPal's real per-item statuses. Idempotent: running it twice
+ * changes nothing the second time. Before applying anything it checks that
+ * PayPal returned OUR batch; items PayPal reports that we never sent, duplicate
+ * items, and our items missing from PayPal are all surfaced, never ignored.
  */
 export async function refreshShiftPayoutStatus(db: Db, gateway: PayoutGateway, args: { shiftId: string; actor: string }) {
   const [batch] = await db
@@ -253,51 +307,75 @@ export async function refreshShiftPayoutStatus(db: Db, gateway: PayoutGateway, a
   }
 
   const res = await gateway.getBatch(batch.paypalBatchId);
-  const rows = await db.select().from(s.payouts).where(eq(s.payouts.batchId, batch.id));
-  let changed = 0;
+  if (
+    res.batch_header.payout_batch_id !== batch.paypalBatchId ||
+    res.batch_header.sender_batch_header.sender_batch_id !== batch.senderBatchId
+  ) {
+    throw new PayoutError("PayPal returned a different batch than the one on record. Nothing was updated.", "reconciliation");
+  }
 
-  for (const item of res.items ?? []) {
-    const row = rows.find((r) => r.senderItemId === item.payout_item.sender_item_id);
-    if (!row) continue; // not ours — ignore rather than guess
-    const status = mapItemStatus(item.transaction_status);
-    let errorMessage = item.errors?.message ? `${item.errors.name ?? ""} ${item.errors.message}`.trim() : null;
-    if (decimalStringToPence(item.payout_item.amount.value) !== row.amountPence) {
-      errorMessage = `Amount mismatch: PayPal reports ${item.payout_item.amount.value}, expected ${row.amountPence}p`;
+  const rows = await db.select().from(s.payouts).where(eq(s.payouts.batchId, batch.id));
+  const ours = new Set(rows.map((r) => r.senderItemId));
+  const items = res.items ?? [];
+  const seen = new Map<string, number>();
+  for (const it of items) seen.set(it.payout_item.sender_item_id, (seen.get(it.payout_item.sender_item_id) ?? 0) + 1);
+
+  const unknownItems = items.filter((it) => !ours.has(it.payout_item.sender_item_id)).map((it) => it.payout_item_id);
+  const duplicateIds = [...seen].filter(([, n]) => n > 1).map(([id]) => id);
+  const missingFromPayPal = rows.filter((r) => !seen.has(r.senderItemId)).map((r) => r.id);
+
+  let changed = 0;
+  for (const row of rows) {
+    const matches = items.filter((it) => it.payout_item.sender_item_id === row.senderItemId);
+    if (matches.length === 0) continue; // not visible yet — leave as is, reported below
+    if (matches.length > 1) {
+      const issue = "PayPal reports this item more than once — needs manual review";
+      if (row.reconciliationIssue !== issue) {
+        await db.update(s.payouts).set({ reconciliationIssue: issue, updatedAt: new Date() }).where(eq(s.payouts.id, row.id));
+        changed++;
+      }
+      continue;
     }
-    const next = {
-      status,
-      paypalItemId: item.payout_item_id,
-      paypalTransactionId: item.transaction_id ?? null,
-      errorMessage,
-    };
-    const same =
-      row.status === next.status &&
-      row.paypalItemId === next.paypalItemId &&
-      row.paypalTransactionId === next.paypalTransactionId &&
-      row.errorMessage === next.errorMessage;
-    if (same) continue;
+    const { next, changed: diff } = reconcileItem(row, matches[0]);
+    if (!diff) continue;
     await db.update(s.payouts).set({ ...next, updatedAt: new Date() }).where(eq(s.payouts.id, row.id));
     changed++;
   }
 
+  const batchIssues = [
+    unknownItems.length ? `PayPal reports ${unknownItems.length} item(s) FairShift never sent: ${unknownItems.join(", ")}` : null,
+    duplicateIds.length ? `Duplicate items in PayPal's batch: ${duplicateIds.join(", ")}` : null,
+  ].filter(Boolean);
+
   const batchStatus = mapBatchStatus(res.batch_header.batch_status);
   await db
     .update(s.payoutBatches)
-    .set({ status: batchStatus, lastStatusCheckAt: new Date(), updatedAt: new Date() })
+    .set({
+      status: batchStatus,
+      lastStatusCheckAt: new Date(),
+      updatedAt: new Date(),
+      ...(batchIssues.length ? { lastError: batchIssues.join(" · ") } : {}),
+    })
     .where(eq(s.payoutBatches.id, batch.id));
 
   const after = await db.select().from(s.payouts).where(eq(s.payouts.batchId, batch.id));
-  const allPaid = after.length > 0 && after.every((p) => p.status === "success");
+  const allPaid = after.length > 0 && batchIssues.length === 0 && after.every(isConfirmedPaid);
   await db.update(s.shifts).set({ status: allPaid ? "paid" : "closed" }).where(eq(s.shifts.id, args.shiftId));
 
-  if (changed) {
+  if (changed || batchIssues.length) {
     await db.insert(s.auditLog).values({
       actor: args.actor,
       action: "payout.status_refreshed",
       entity: "payout_batch",
       entityId: batch.id,
-      data: { batchStatus: res.batch_header.batch_status, changedItems: changed },
+      data: {
+        batchStatus: res.batch_header.batch_status,
+        changedItems: changed,
+        unknownItems,
+        duplicateIds,
+        missingFromPayPal: missingFromPayPal.length,
+      },
     });
   }
-  return { batchStatus, changed, allPaid, items: after };
+  return { batchStatus, changed, allPaid, items: after, unknownItems, duplicateIds, missingFromPayPal };
 }

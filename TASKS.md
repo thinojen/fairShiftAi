@@ -31,11 +31,21 @@ Legend: ✅ done & verified · 🟡 built, needs external credentials to verify 
 - ✅ PGlite integration tests (25) on the real migrations + seed
 - ✅ Local end-to-end browser run (real server actions over the Postgres wire protocol; wrong codes only, no PayPal calls)
 - 🟡 **Run `db-migrate` then `db-seed`** in GitHub Actions to apply `0001_milestone2.sql` to Supabase
-- 🟡 **Deploy to Render** and test a real sandbox payout through the UI (needs `PAYOUTS_ENABLED`, `MANAGER_APPROVAL_CODE`, `PAYOUT_MAX_ITEM_PENCE=30000`)
+- 🟡 Real sandbox payout through the UI — only in a controlled environment (not the public Render demo)
 - 🟡 Live Supabase + live PayPal for the dashboard flow — untested until deployed
 
-## Milestone 3 — Deploy, webhooks, worker view & AI explanations (Wed 4 – Fri 6 Nov)
-- ⬜ Deploy to Render; register webhook; set `PAYPAL_WEBHOOK_ID`
+## Pre-deploy hardening (Tue 3 Nov) ✅
+- ✅ **Verified by user:** `db-migrate` + `db-seed` (M2) on Supabase
+- ✅ Payment history permanent: seed refuses when payouts exist, keeps audit log; FK RESTRICT; DELETE/TRUNCATE triggers (migrations 0002, 0003)
+- ✅ Upgrade path rehearsed: DB at 0001 + seeded → apply 0002/0003 → data intact, triggers present
+- ✅ Reconciliation checks batch identity, amount, currency and recipient; mismatches = "Needs review", never paid
+- ✅ Single role-independent payout gate (`authorisePayout`)
+- ✅ Render Blueprint, Node 22 pin, `/api/health`, security headers; production run rehearsed with the public config
+- 🟡 **Run `db-migrate`** in Actions (applies 0002 + 0003). Do NOT run `db-seed` unless you want a fresh demo — it is safe, but not needed
+- 🟡 **Deploy on Render** (README → "Deploying to Render")
+
+## Milestone 3 — Webhooks, worker view & AI explanations (Wed 4 – Fri 6 Nov)
+- ⬜ Register webhook on the Render URL; set `PAYPAL_WEBHOOK_ID`
 - ⬜ Webhook → payout item reconciliation (verified, duplicate-safe; reuse `refreshShiftPayoutStatus` logic)
 - ⬜ Worker earnings + shift breakdown
 - ⬜ AI chat with read-only tools (SPEC §6); "why was I paid less" end-to-end
