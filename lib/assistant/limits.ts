@@ -5,6 +5,8 @@
  * Keys are the client IP AND a fixed global key — switching the demo worker
  * does not reset anything.
  */
+import { providerConfig } from "./providers";
+
 type Env = Record<string, string | undefined>;
 
 export const LIMITS = {
@@ -16,13 +18,14 @@ export const LIMITS = {
   maxOutputTokens: 1200,
   perClientPerWindow: 15,
   windowMs: 10 * 60_000,
-  globalPerMinute: 30,
+  /** Free-tier protection: at most 5 questions per minute across ALL users. */
+  globalPerMinute: 5,
 };
 
-export function aiAvailability(env: Env = process.env): { enabled: true; model: string } | { enabled: false; reason: string } {
-  if (env.AI_ENABLED === "false") return { enabled: false, reason: "The assistant is switched off right now." };
-  if (!env.OPENAI_API_KEY) return { enabled: false, reason: "The assistant isn't configured on this server." };
-  return { enabled: true, model: env.OPENAI_MODEL?.trim() || "gpt-5.4-mini" };
+/** UI helper: is the assistant usable on this server? (Details come from providers/index.ts.) */
+export function aiAvailability(env: Env = process.env): { enabled: true; model: string; provider: string } | { enabled: false; reason: string } {
+  const cfg = providerConfig(env);
+  return cfg.ok ? { enabled: true, model: cfg.model, provider: cfg.provider } : { enabled: false, reason: cfg.reason };
 }
 
 export class UsageLimiter {
@@ -62,9 +65,9 @@ export class UsageLimiter {
   }
 }
 
-function dailyLimitFromEnv(env: Env = process.env) {
+export function dailyLimitFromEnv(env: Env = process.env) {
   const n = Number(env.AI_DAILY_LIMIT);
-  return Number.isSafeInteger(n) && n > 0 ? Math.min(n, 5000) : 200;
+  return Number.isSafeInteger(n) && n > 0 ? Math.min(n, 5000) : 100;
 }
 
 export const assistantLimiter = new UsageLimiter(() => dailyLimitFromEnv());

@@ -41,6 +41,21 @@ const eslintConfig = defineConfig([
       ],
     },
   },
+  {
+    // Browser components must never import AI provider code (API keys live server-side).
+    files: ["components/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            { regex: "^@/lib/paypal/(?!server$)", message: "Import PayPal code from @/lib/paypal/server only." },
+            { regex: "^@/lib/assistant/(providers|server|limits|run|tools)", message: "Client components must not import AI provider/runtime code." },
+          ],
+        },
+      ],
+    },
+  },
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",

@@ -56,9 +56,18 @@ Legend: ✅ done & verified · 🟡 built, needs external credentials to verify 
 - ✅ Tests: 150+ (tools on PGlite, fake-model loop, validation, injection, scoping, duplicates, state machine)
 - ✅ Local end-to-end run on real PostgreSQL with a mock Responses API (full Sam flow incl. manager inbox)
 - 🟡 **Run `db-migrate`** in Actions (applies `0004_pay_queries_workflow.sql`)
-- 🟡 **Add `OPENAI_API_KEY` secret** in GitHub and **run `ai-check`** — the real OpenAI test (7 scenarios)
-- 🟡 **Add `OPENAI_API_KEY`** (+ AI vars) on Render and try Sam's questions on the live site
+- ↪ AI provider switched to Gemini free tier — see below
 - ⬜ Webhook → payout item reconciliation (moved to Milestone 4)
+
+## Gemini migration — free-tier AI (Tue 3 Nov) ✅ built, 🟡 not yet verified against real Gemini
+- ✅ Gemini adapter (Chat Completions), thought-signature replay, schema dialect, explicit-rejection format fallback
+- ✅ Strict answer-shape validation; fact ledger unchanged
+- ✅ Free-tier limits: 5/min global, 100/day; friendly quota/auth errors; no automatic retries
+- ✅ 18 new tests (168 total) incl. a full interaction over HTTP against a Gemini-like server that enforces thought signatures
+- ✅ Local rehearsals: ai-smoke + ai-check pass against a Gemini-format mock; quota → INCONCLUSIVE; app route → friendly 429; 5/min cap
+- 🟡 **Add `GEMINI_API_KEY` secret → run `ai-smoke`** (proves real function calling + thought signatures)
+- 🟡 **Run `ai-check`** (7 real scenarios)
+- 🟡 **Render: add `GEMINI_API_KEY`, `AI_PROVIDER=gemini`, `GEMINI_MODEL`, `AI_DAILY_LIMIT=100`; remove OpenAI vars**
 
 ## Milestone 4 — Webhooks & corrections (Wed 4 – Sat 7 Nov)
 - ⬜ Register PayPal webhook on the Render URL; apply verified item events (reuse reconciliation)

@@ -49,6 +49,26 @@ function textOf(resp: ModelResponse): string {
     .join("");
 }
 
+export type AnswerShape = { answer: string; cited_fact_ids: string[]; offer_pay_query: boolean };
+
+/** Validate the model's JSON against ANSWER_SCHEMA (required keys, exact types, no extras). */
+export function parseAnswerShape(text: string): { ok: true; value: AnswerShape } | { ok: false; error: string } {
+  let v: unknown;
+  try {
+    v = JSON.parse(text);
+  } catch {
+    return { ok: false, error: "the response was not valid JSON" };
+  }
+  if (!v || typeof v !== "object" || Array.isArray(v)) return { ok: false, error: "the response was not a JSON object" };
+  const o = v as Record<string, unknown>;
+  const keys = Object.keys(o).sort().join(",");
+  if (keys !== "answer,cited_fact_ids,offer_pay_query") return { ok: false, error: `the JSON must have exactly answer, cited_fact_ids, offer_pay_query (got ${keys || "none"})` };
+  if (typeof o.answer !== "string") return { ok: false, error: "answer must be a string" };
+  if (!Array.isArray(o.cited_fact_ids) || !o.cited_fact_ids.every((x) => typeof x === "string")) return { ok: false, error: "cited_fact_ids must be an array of strings" };
+  if (typeof o.offer_pay_query !== "boolean") return { ok: false, error: "offer_pay_query must be a boolean" };
+  return { ok: true, value: { answer: o.answer, cited_fact_ids: o.cited_fact_ids as string[], offer_pay_query: o.offer_pay_query } };
+}
+
 export function sanitizeHistory(history: ChatTurn[]): ChatTurn[] {
   const recent = history.filter((t) => (t.role === "user" || t.role === "assistant") && typeof t.content === "string").slice(-LIMITS.maxHistoryMessages);
   let budget = LIMITS.maxHistoryChars;
@@ -122,17 +142,13 @@ export async function runAssistant(args: {
       continue;
     }
 
-    // Final answer.
-    let parsed: { answer?: unknown; cited_fact_ids?: unknown; offer_pay_query?: unknown } = {};
-    try {
-      parsed = JSON.parse(textOf(resp));
-    } catch {
-      parsed = {};
-    }
-    const answer = typeof parsed.answer === "string" ? parsed.answer : "";
-    const v = validateAnswer(answer, ledger);
+    // Final answer: must be JSON matching ANSWER_SCHEMA exactly, then pass the fact-ledger checks.
+    const shape = parseAnswerShape(textOf(resp));
+    const parsed = shape.ok ? shape.value : { answer: "", cited_fact_ids: [], offer_pay_query: false };
+    const answer = parsed.answer;
+    const v: ReturnType<typeof validateAnswer> = shape.ok ? validateAnswer(answer, ledger) : { ok: false, violations: [shape.error] };
     if (v.ok) {
-      const cited = Array.isArray(parsed.cited_fact_ids) ? parsed.cited_fact_ids.map(String) : [];
+      const cited = parsed.cited_fact_ids;
       const extra = cited.map((id) => ledger.get(id)).filter((f): f is NonNullable<typeof f> => Boolean(f));
       const facts = [...v.usedFacts, ...extra.filter((f) => !v.usedFacts.includes(f))];
       return {

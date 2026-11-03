@@ -20,12 +20,12 @@ Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/). UK 
 ## How the AI is kept honest
 > **AI investigates and explains. Deterministic code calculates. Humans authorise. PayPal moves the money.**
 
-1. **Tools, not guesses.** The assistant (OpenAI Responses API, server-side function calling) can only call 7 read-only tools: `get_worker_shifts`, `get_tip_pool`, `get_policy`, `get_allocation_breakdown`, `get_payout_status`, `compare_periods`, `create_pay_query` (builds a *proposal*; saves nothing). None take a worker id — the server scopes every call to the current demo worker.
+1. **Tools, not guesses.** The assistant (Google Gemini on the free API tier, server-side function calling) can only call 7 read-only tools: `get_worker_shifts`, `get_tip_pool`, `get_policy`, `get_allocation_breakdown`, `get_payout_status`, `compare_periods`, `create_pay_query` (builds a *proposal*; saves nothing). None take a worker id — the server scopes every call to the current demo worker.
 2. **A fact ledger.** Every amount, time, status or PayPal id a tool returns is registered with the record it came from. The model must refer to values as `[[fact]]` placeholders in a structured answer.
 3. **Answer validation.** Any raw money, percentage, duration, clock time, id — or a "you've been paid" claim without a successful PayPal payout — is rejected. One retry, then a safe fallback. The browser shows values from the ledger as highlighted chips, plus evidence cards built by code.
 4. **Precomputed comparisons.** "Why did I earn less?" is answered from a fixed-order counterfactual computed in TypeScript (pool → your points → rest of team). For Sam: −£54.13, −£27.04, −£30.52 = −£111.69.
 5. **Humans click.** Drafting and sending a pay query are explicit worker clicks; accepting/resolving are manager actions; none of them change hours or pay.
-6. **Spending limits.** Per-IP and global rate limits, a daily cap (`AI_DAILY_LIMIT`), token/tool-call limits and an `AI_ENABLED` kill switch. These counters are in memory: best-effort, and they reset when Render restarts.
+6. **Free-tier limits.** At most 5 questions per minute across all users, a daily cap (`AI_DAILY_LIMIT`, default 100), per-IP limits, token/tool-call limits and an `AI_ENABLED` kill switch. If Gemini's free quota runs out, the chat says so plainly — it never makes up an answer. These counters are in memory: best-effort, and they reset when Render restarts.
 
 ## Demo script — Sam's two Fridays
 1. **View as → Sam.** Fri 30 Oct is **Blocked** (missing clock-out). Ask *"Why were my tips lower last Friday?"* — the assistant explains it can't compare yet.
@@ -40,7 +40,7 @@ Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/). UK 
 - **Per-worker payment status.** An accepted batch isn't treated as "paid" — each payout item's PayPal status is tracked.
 
 ## Tech stack
-Next.js 16 · TypeScript · Tailwind + shadcn/ui · Drizzle ORM · Supabase Postgres · PayPal REST (Payouts v1, Webhooks; Orders v2 planned) · OpenAI (planned) · Render · Vitest
+Next.js 16 · TypeScript · Tailwind + shadcn/ui · Drizzle ORM · Supabase Postgres · PayPal REST (Payouts v1, Webhooks; Orders v2 planned) · Google Gemini API (free tier) · Render · Vitest
 
 ## PayPal APIs used
 | API | Use | Status |
@@ -51,7 +51,8 @@ Next.js 16 · TypeScript · Tailwind + shadcn/ui · Drizzle ORM · Supabase Post
 | Orders v2 | funding the tip pool | ⬜ planned |
 
 ## AI tools used
-- **OpenAI Responses API** (`gpt-5.4-mini` by default, configurable) with server-side function calling and structured outputs — powers the worker assistant. See "How the AI is kept honest" above.
+- **Google Gemini API — free tier** (`gemini-3.1-flash-lite`) via Google's OpenAI-compatible Chat Completions endpoint, with server-side function calling and structured output, through a small adapter (`lib/assistant/providers/gemini.ts`) that preserves Gemini 3 thought signatures. No billing is enabled. Note: on the free tier Google may use prompts to improve its products — all data here is synthetic.
+- OpenAI remains available as an optional, paid alternative (`AI_PROVIDER=openai`); it is not used by default.
 - **Claude Code** — used as a coding assistant to build the project.
 
 ## ⚠️ Demo mode & limitations
@@ -79,10 +80,11 @@ The repo includes a Render Blueprint (`render.yaml`) for the **public demo**: pa
 | `NODE_VERSION` | `22` | set by the Blueprint |
 | `MANAGER_APPROVAL_CODE` | **do not set** | the public demo must not be able to pay |
 | `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET` | not needed yet | added in Milestone 4 for webhooks |
-| `OPENAI_API_KEY` | your OpenAI key | **secret** — server-side only |
-| `OPENAI_MODEL` | `gpt-5.4-mini` | set by the Blueprint |
+| `GEMINI_API_KEY` | your free Gemini key | **secret** — server-side only |
+| `AI_PROVIDER` | `gemini` | set by the Blueprint |
+| `GEMINI_MODEL` | `gemini-3.1-flash-lite` | set by the Blueprint |
 | `AI_ENABLED` | `true` (`false` = kill switch) | set by the Blueprint |
-| `AI_DAILY_LIMIT` | `200` | set by the Blueprint |
+| `AI_DAILY_LIMIT` | `100` | set by the Blueprint |
 
 ### Render step by step
 1. Sign in at [render.com](https://render.com) with GitHub.
@@ -114,7 +116,7 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 | `PAYPAL_SANDBOX_RECIPIENTS` | Comma-separated sandbox personal emails (Sam, Priya, Jordan, Alex, Casey) |
 | `DATABASE_URL` | Supabase **session pooler** URI (port 5432) |
 | `PAYPAL_WEBHOOK_ID` | *(later, after deploying)* |
-| `OPENAI_API_KEY` | for the `ai-check` task |
+| `GEMINI_API_KEY` | for the `ai-smoke` / `ai-check` tasks |
 
 The app itself (e.g. on Render) also needs `PAYOUT_MAX_ITEM_PENCE=30000`, and — only where real sandbox payouts should be possible — `PAYOUTS_ENABLED=true` and `MANAGER_APPROVAL_CODE`.
 
@@ -124,7 +126,9 @@ Repo → **Actions → Integration (manual) → Run workflow**, choose a task:
 - `paypal-test-payout` — sends one £1.00 **sandbox** payout. Does nothing unless **confirm_payout** is ticked. To retry safely, paste the `sender_batch_id` from the previous run's log into **batch_id**.
 - `db-migrate` — applies the database schema. Run it after pulling a new migration (Milestone 2 adds `0001_milestone2.sql`).
 - `db-seed` — loads synthetic demo data (no PayPal calls). Refuses once payment history or pay queries exist.
-- `ai-check` — the **real OpenAI test**: runs 7 scenarios (blocked shift, provisional and locked comparisons, no payout, extra-hour claim, cross-worker request, prompt injection) on an **in-memory** database. Never touches Supabase or PayPal. Needs the `OPENAI_API_KEY` secret (optional repository *variable* `OPENAI_MODEL`).
+- `ai-smoke` — **one real Gemini interaction**: question → Gemini calls a tool → our tool runs → verified answer, and checks Gemini's thought signature is sent back unchanged. Run this first.
+- `ai-check` — the **full real-Gemini test**: 7 scenarios (blocked shift, provisional and locked comparisons, no payout, extra-hour claim, cross-worker request, prompt injection), paced for the free tier (~3 min). If the free quota runs out it reports **INCONCLUSIVE** (red), never a pass.
+- Both use an **in-memory** database and never touch Supabase or PayPal. They need the `GEMINI_API_KEY` secret (optional repository *variable* `GEMINI_MODEL`).
 
 Open the run and click the job to read the output. Secrets are masked in logs.
 
@@ -146,7 +150,7 @@ npm run paypal:test-payout -- --confirm
 | `npm run db:migrate` · `npm run db:seed` | Apply schema · load demo data |
 | `npm run paypal:check` | Read-only PayPal feasibility check |
 | `npm run paypal:test-payout -- --confirm [--batch-id ID]` | One £1.00 sandbox payout |
-| `npm run ai:check` | Real OpenAI assistant test on an in-memory database |
+| `npm run ai:check [-- --smoke]` | Real Gemini assistant test on an in-memory database |
 
 ## License
 [MIT](LICENSE)
