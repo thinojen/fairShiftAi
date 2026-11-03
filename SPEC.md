@@ -163,3 +163,16 @@ Include a **Reset demo** button (manager view) that reseeds everything.
 - [ ] Hosted demo on Render works in a fresh incognito window
 - [ ] Video < 3 min on YouTube (public), no copyrighted music
 - [ ] Devpost description + tools list
+
+## Amendments
+
+Changes made during implementation. Each is additive or a representation detail; none changes the financial rules.
+
+**M1 (3 Nov 2026)**
+1. **Integer units for tip maths.** `allocations.hours_decimal` → `worked_minutes` (integer) and `weight` → `weight_bp` (basis points, 1.2 → 120); `points = minutes × weight_bp`. Keeps every calculation in integers. Policy `rules` use `weightsBp` and `minMinutesToQualify`.
+2. **Payout idempotency columns.** `payout_batches.sender_batch_id` (unique), `approved_by`, `last_error`, `updated_at`; `payouts.sender_item_id` (unique), `paypal_transaction_id`, `error_message`. Payout statuses extended to all PayPal item statuses (`onhold`, `blocked`, `refunded`, `reversed`); batch statuses `created/submitted/pending/processing/success/denied/canceled/error`.
+3. **`webhook_events` table** keyed by PayPal event id, for duplicate-safe webhook handling.
+4. **Uncovered slots.** `shift_assignments.worker_id` is nullable (status `uncovered`).
+5. **Database access** via Drizzle ORM (schema in `lib/db/schema.ts` is the source of truth; migrations generated into `/drizzle`).
+6. **Sandbox safety controls:** hard-coded sandbox base URL, recipient allowlist, per-item/per-batch caps with hard ceilings.
+7. **Integration testing** runs from a manual GitHub Actions workflow, as the build environment cannot reach PayPal or Supabase.

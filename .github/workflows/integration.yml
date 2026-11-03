@@ -1,0 +1,83 @@
+name: Integration (manual)
+
+# Run from GitHub: Actions → "Integration (manual)" → Run workflow.
+# Only people with write access to the repo can trigger it.
+#
+# Tasks
+#   paypal-check        read-only: auth, Payouts permission, API reachability. Moves no money.
+#   paypal-test-payout  sends ONE £1.00 SANDBOX payout — only if "confirm_payout" is ticked.
+#   db-migrate          applies generated SQL migrations to Supabase.
+#   db-seed             wipes + reseeds synthetic demo data. Never touches PayPal.
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: What to run
+        type: choice
+        options: [paypal-check, paypal-test-payout, db-migrate, db-seed]
+        default: paypal-check
+      confirm_payout:
+        description: "paypal-test-payout only — tick to really send £1.00 in the PayPal SANDBOX"
+        type: boolean
+        default: false
+      batch_id:
+        description: "paypal-test-payout only — paste a previous sender_batch_id to RETRY it safely (leave empty for a new payout)"
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+# Never run two integration jobs at once (prevents accidental double payouts).
+concurrency:
+  group: integration
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: PayPal check (read-only)
+        if: inputs.task == 'paypal-check'
+        env:
+          PAYPAL_CLIENT_ID: ${{ secrets.PAYPAL_CLIENT_ID }}
+          PAYPAL_CLIENT_SECRET: ${{ secrets.PAYPAL_CLIENT_SECRET }}
+          PAYPAL_SANDBOX_RECIPIENTS: ${{ secrets.PAYPAL_SANDBOX_RECIPIENTS }}
+          PAYPAL_WEBHOOK_ID: ${{ secrets.PAYPAL_WEBHOOK_ID }}
+        run: npm run paypal:check
+
+      - name: PayPal sandbox test payout (£1.00)
+        if: inputs.task == 'paypal-test-payout'
+        env:
+          PAYPAL_CLIENT_ID: ${{ secrets.PAYPAL_CLIENT_ID }}
+          PAYPAL_CLIENT_SECRET: ${{ secrets.PAYPAL_CLIENT_SECRET }}
+          PAYPAL_SANDBOX_RECIPIENTS: ${{ secrets.PAYPAL_SANDBOX_RECIPIENTS }}
+          # Inputs are passed via env (never interpolated into the script) to avoid injection.
+          CONFIRM: ${{ inputs.confirm_payout }}
+          BATCH_ID: ${{ inputs.batch_id }}
+        run: |
+          args=()
+          if [ "$CONFIRM" = "true" ]; then args+=(--confirm); fi
+          if [ -n "$BATCH_ID" ]; then args+=(--batch-id "$BATCH_ID"); fi
+          npm run paypal:test-payout -- "${args[@]}"
+
+      - name: Database migrate
+        if: inputs.task == 'db-migrate'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm run db:migrate
+
+      - name: Database seed (synthetic data, no PayPal)
+        if: inputs.task == 'db-seed'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          PAYPAL_SANDBOX_RECIPIENTS: ${{ secrets.PAYPAL_SANDBOX_RECIPIENTS }}
+        run: npm run db:seed
