@@ -1,10 +1,40 @@
 import { describe, expect, it } from "vitest";
 import {
   ABSOLUTE_MAX_ITEM_PENCE,
+  checkScope,
   loadPayPalConfig,
   maskEmail,
+  PAYOUTS_SCOPE,
   PAYPAL_SANDBOX_BASE_URL,
 } from "@/lib/paypal/config";
+
+describe("Payouts scope", () => {
+  it("matches PayPal's documented scope for creating payouts", () => {
+    expect(PAYOUTS_SCOPE).toBe("https://uri.paypal.com/payments/payouts");
+  });
+
+  it("is present only on an exact match", () => {
+    const tokenScopes = [
+      "https://uri.paypal.com/services/payments/payment",
+      "https://uri.paypal.com/payments/payouts",
+    ];
+    expect(checkScope(tokenScopes, PAYOUTS_SCOPE).present).toBe(true);
+  });
+
+  it("reports missing when only a look-alike scope is granted, and surfaces it", () => {
+    const tokenScopes = [
+      "https://uri.paypal.com/services/payments/payouts", // look-alike, not the documented scope
+      "openid",
+    ];
+    const res = checkScope(tokenScopes, PAYOUTS_SCOPE);
+    expect(res.present).toBe(false);
+    expect(res.relatedScopes).toEqual(["https://uri.paypal.com/services/payments/payouts"]);
+  });
+
+  it("reports missing for an empty token", () => {
+    expect(checkScope([], PAYOUTS_SCOPE)).toEqual({ present: false, relatedScopes: [] });
+  });
+});
 
 const base = { PAYPAL_CLIENT_ID: "id", PAYPAL_CLIENT_SECRET: "secret" };
 

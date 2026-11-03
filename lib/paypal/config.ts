@@ -8,8 +8,29 @@
 
 export const PAYPAL_SANDBOX_BASE_URL = "https://api-m.sandbox.paypal.com" as const;
 
-export const PAYOUTS_SCOPE = "https://uri.paypal.com/services/payments/payouts";
+/**
+ * Required to create payouts (POST /v1/payments/payouts), per PayPal's API reference:
+ * https://developer.paypal.com/api/payments.payouts-batch/v1/payouts-post
+ */
+export const PAYOUTS_SCOPE = "https://uri.paypal.com/payments/payouts";
 export const WEBHOOKS_SCOPE = "https://uri.paypal.com/services/applications/webhooks";
+
+export type ScopeCheck = {
+  present: boolean;
+  /** Other payout-related scopes on the token, to help diagnose a missing permission. */
+  relatedScopes: string[];
+};
+
+/**
+ * Whether the OAuth token grants a scope. Exact match only — a similar-looking
+ * scope does not count, and nothing else (e.g. an API probe) can substitute.
+ */
+export function checkScope(tokenScopes: readonly string[], required: string): ScopeCheck {
+  return {
+    present: tokenScopes.includes(required),
+    relatedScopes: tokenScopes.filter((s) => s !== required && /payout/i.test(s)),
+  };
+}
 
 /** Hard ceilings that no env var can raise. */
 export const ABSOLUTE_MAX_ITEM_PENCE = 50_000; // £500

@@ -14,7 +14,8 @@ Legend: ✅ done & verified · 🟡 built, needs external credentials to verify 
 - ✅ Webhook route: signature verification + duplicate-safe storage
 - ✅ CI workflow + manual Integration workflow (GitHub Actions)
 - ✅ Unit tests (27), typecheck, lint, production build all pass locally
-- 🟡 **Run `paypal-check` in GitHub Actions** (needs PayPal secrets)
+- ✅ Fixed Payouts scope to PayPal's documented `https://uri.paypal.com/payments/payouts`; permission now decided only by the token's scopes (the 404 probe is reported as connectivity only)
+- 🟡 **Re-run `paypal-check` in GitHub Actions** — auth, webhooks scope and 5 recipients confirmed; Payouts scope to re-verify after the fix
 - 🟡 **Run `paypal-test-payout` with confirm** — PayPal integration is unproven until this succeeds
 - 🟡 **Run `db-migrate` then `db-seed`** (needs `DATABASE_URL` secret)
 - ⬜ Webhook → `payouts` status updates (route stores events but does NOT apply them yet)
