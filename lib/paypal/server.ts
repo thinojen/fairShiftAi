@@ -20,4 +20,4 @@ export function getPayPal() {
 export * from "./payouts";
 export { verifyWebhookSignature, eventResourceId, type WebhookEvent } from "./webhooks";
 export { PayPalApiError } from "./client";
-export { PayoutGuardError } from "./guards";
+export { PayoutGuardError, assertPayoutAllowed } from "./guards";

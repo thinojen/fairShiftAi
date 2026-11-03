@@ -24,6 +24,7 @@ export async function seedDemo(db: Db, opts: { recipientsCsv?: string } = {}) {
     await tx.delete(s.payoutBatches);
     await tx.delete(s.allocations);
     await tx.delete(s.flags);
+    await tx.delete(s.timeCorrections);
     await tx.delete(s.tipPools);
     await tx.delete(s.shiftAssignments);
     await tx.delete(s.shifts);
@@ -55,7 +56,7 @@ export async function seedDemo(db: Db, opts: { recipientsCsv?: string } = {}) {
           clockOut: a.clockOut ? new Date(a.clockOut) : null,
         })),
       );
-      await tx.insert(s.tipPools).values({ ...sh.tipPool, shiftId: sh.id });
+      await tx.insert(s.tipPools).values({ ...sh.tipPool, shiftId: sh.id, isDemo: true });
     }
 
     await tx.insert(s.auditLog).values({

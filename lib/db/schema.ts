@@ -9,6 +9,7 @@
  * - IDs: text. Seed data uses readable, stable IDs (e.g. "w_sam") so reseeding is
  *   repeatable and the AI can cite records; runtime rows use random UUIDs.
  */
+import { sql } from "drizzle-orm";
 import {
   boolean,
   date,
@@ -37,15 +38,18 @@ export const assignmentStatusEnum = pgEnum("assignment_status", [
 ]);
 export const tipSourceEnum = pgEnum("tip_source", ["card", "cash", "service_charge"]);
 export const batchStatusEnum = pgEnum("payout_batch_status", [
-  "created", // row exists locally, nothing sent to PayPal yet
+  "created", // row + sender_batch_id persisted, nothing sent to PayPal yet
+  "sending", // a request currently holds the send claim (see lib/payouts/service.ts)
   "submitted", // POST accepted by PayPal (does NOT mean anyone is paid)
   "pending",
   "processing",
   "success", // PayPal finished processing the batch (items may still differ)
   "denied",
   "canceled",
-  "error", // our request failed before PayPal accepted it
+  "error", // last send attempt failed; outcome may be uncertain — retry with the SAME sender_batch_id
 ]);
+export const batchKindEnum = pgEnum("payout_batch_kind", ["shift", "correction"]);
+export const correctionFieldEnum = pgEnum("correction_field", ["clock_in", "clock_out", "break_minutes"]);
 /** Mirrors PayPal payout *item* transaction_status values, lower-cased. */
 export const payoutStatusEnum = pgEnum("payout_status", [
   "pending",
@@ -137,6 +141,13 @@ export const shiftAssignments = pgTable(
     clockOut: timestamp("clock_out", { withTimezone: true }),
     breakMinutes: integer("break_minutes").notNull().default(0),
     status: assignmentStatusEnum("status").notNull().default("scheduled"),
+    /**
+     * Evidence: the values as first recorded, captured on the first manual
+     * correction and never changed afterwards. Full history: time_corrections.
+     */
+    hoursCorrected: boolean("hours_corrected").notNull().default(false),
+    originalClockIn: timestamp("original_clock_in", { withTimezone: true }),
+    originalClockOut: timestamp("original_clock_out", { withTimezone: true }),
     createdAt: createdAt(),
   },
   (t) => [index("shift_assignments_shift").on(t.shiftId), index("shift_assignments_worker").on(t.workerId)],
@@ -147,6 +158,8 @@ export const tipPools = pgTable("tip_pools", {
   shiftId: text("shift_id").notNull().references(() => shifts.id, { onDelete: "cascade" }),
   grossPence: integer("gross_pence").notNull(),
   source: tipSourceEnum("source").notNull(),
+  /** Seeded demonstration pool — NOT funded through PayPal Orders. */
+  isDemo: boolean("is_demo").notNull().default(false),
   paypalOrderId: text("paypal_order_id"),
   fundedAt: timestamp("funded_at", { withTimezone: true }),
   createdAt: createdAt(),
@@ -171,9 +184,13 @@ export const allocations = pgTable(
 );
 
 // ---------- payouts ----------
-export const payoutBatches = pgTable("payout_batches", {
+export const payoutBatches = pgTable(
+  "payout_batches",
+  {
   id: id(),
   venueId: text("venue_id").notNull().references(() => venues.id, { onDelete: "cascade" }),
+  shiftId: text("shift_id").notNull().references(() => shifts.id, { onDelete: "cascade" }),
+  kind: batchKindEnum("kind").notNull().default("shift"),
   /** Idempotency key sent to PayPal. Generated once, reused on every retry. */
   senderBatchId: text("sender_batch_id").notNull().unique(),
   paypalBatchId: text("paypal_batch_id").unique(),
@@ -181,9 +198,15 @@ export const payoutBatches = pgTable("payout_batches", {
   /** Who approved it (demo role label) — payouts always need manager approval. */
   approvedBy: text("approved_by").notNull(),
   lastError: text("last_error"),
+  /** Number of times this batch was sent to PayPal (always with the same sender_batch_id). */
+  sendAttempts: integer("send_attempts").notNull().default(0),
+  lastStatusCheckAt: timestamp("last_status_check_at", { withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+  },
+  // At most ONE tip-pool payout batch per shift. Correction batches (Milestone 4) are separate.
+  (t) => [uniqueIndex("payout_batches_one_per_shift").on(t.shiftId).where(sql`${t.kind} = 'shift'`)],
+);
 
 export const payouts = pgTable(
   "payouts",
@@ -218,6 +241,25 @@ export const webhookEvents = pgTable("webhook_events", {
 });
 
 // ---------- review & disputes ----------
+/** Append-only history of manual hour corrections. Nothing here is ever updated or deleted. */
+export const timeCorrections = pgTable(
+  "time_corrections",
+  {
+    id: id(),
+    shiftAssignmentId: text("shift_assignment_id")
+      .notNull()
+      .references(() => shiftAssignments.id, { onDelete: "cascade" }),
+    field: correctionFieldEnum("field").notNull(),
+    /** ISO timestamp, minutes as a string, or null if the value was missing. */
+    originalValue: text("original_value"),
+    newValue: text("new_value").notNull(),
+    actor: text("actor").notNull(),
+    reason: text("reason").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("time_corrections_assignment").on(t.shiftAssignmentId)],
+);
+
 export const flags = pgTable("flags", {
   id: id(),
   shiftAssignmentId: text("shift_assignment_id")

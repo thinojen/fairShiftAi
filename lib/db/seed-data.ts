@@ -6,9 +6,13 @@
  * come from the tip engine + a manager-approved PayPal payout, so the seed can
  * never fabricate a payment.
  *
+ * Every tip pool is a labelled DEMONSTRATION amount (tip_pools.is_demo = true).
+ * None was funded through PayPal Orders.
+ *
  * Built-in story (SPEC §9): Sam (bartender) earns less on Fri 30 Oct than on
  * Fri 23 Oct — fewer logged hours (missing clock-out), a smaller pool, and an
  * extra runner on shift. Policy v2 (host weight 0.6 → 0.7) takes effect 26 Oct.
+ * Demo flow: pay 23 Oct → fix Sam's missing 30 Oct clock-out (audited) → pay 30 Oct.
  */
 import type { TipPolicyRules } from "./schema";
 
@@ -73,7 +77,8 @@ type DemoShift = {
   id: string;
   date: string;
   service: "lunch" | "dinner" | "late";
-  status: "open" | "closed";
+  /** Seeded shifts are all "open": nothing is pre-calculated or pre-paid. */
+  status: "open";
   tipPool: { id: string; grossPence: number; source: "card" };
   assignments: Assignment[];
 };
@@ -105,7 +110,7 @@ export const DEMO_SHIFTS: DemoShift[] = [
     id: "sh_2026-10-23_dinner",
     date: "2026-10-23",
     service: "dinner",
-    status: "closed",
+    status: "open",
     tipPool: { id: "tp_2026-10-23_dinner", grossPence: 64000, source: "card" },
     assignments: [
       w("sa_1023_sam", "w_sam", "bartender", "2026-10-23T17:00:00+01:00", "2026-10-24T01:00:00+01:00", "2026-10-23T17:00:00+01:00", "2026-10-24T01:00:00+01:00"),
@@ -118,7 +123,7 @@ export const DEMO_SHIFTS: DemoShift[] = [
     id: "sh_2026-10-24_dinner",
     date: "2026-10-24",
     service: "dinner",
-    status: "closed",
+    status: "open",
     tipPool: { id: "tp_2026-10-24_dinner", grossPence: 71250, source: "card" },
     assignments: [
       w("sa_1024_sam", "w_sam", "bartender", "2026-10-24T17:00:00+01:00", "2026-10-25T01:00:00+01:00", "2026-10-24T17:00:00+01:00", "2026-10-25T01:10:00+01:00"),

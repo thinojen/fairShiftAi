@@ -14,25 +14,34 @@ Legend: ✅ done & verified · 🟡 built, needs external credentials to verify 
 - ✅ Webhook route: signature verification + duplicate-safe storage
 - ✅ CI workflow + manual Integration workflow (GitHub Actions)
 - ✅ Unit tests (27), typecheck, lint, production build all pass locally
-- ✅ Fixed Payouts scope to PayPal's documented `https://uri.paypal.com/payments/payouts`; permission now decided only by the token's scopes (the 404 probe is reported as connectivity only)
-- 🟡 **Re-run `paypal-check` in GitHub Actions** — auth, webhooks scope and 5 recipients confirmed; Payouts scope to re-verify after the fix
-- 🟡 **Run `paypal-test-payout` with confirm** — PayPal integration is unproven until this succeeds
-- 🟡 **Run `db-migrate` then `db-seed`** (needs `DATABASE_URL` secret)
-- ⬜ Webhook → `payouts` status updates (route stores events but does NOT apply them yet)
+- ✅ Fixed Payouts scope to PayPal's documented `https://uri.paypal.com/payments/payouts`
+- ✅ **Verified by user (3 Nov):** sandbox auth, a real £1.00 sandbox payout (SUCCESS), Supabase migrate + seed via GitHub Actions
+- ⬜ Webhook → `payouts` status updates (moved to Milestone 3; needs a public URL)
 
-## Milestone 2 — Tip engine & manager payouts (Wed 4 – Thu 5 Nov)
-- ⬜ `lib/tips/engine.ts` (minutes × weight, largest remainder) + tests from SPEC §5
-- ⬜ Role switcher (demo mode) + server-side guard for manager-only actions
-- ⬜ Manager close-shift flow → allocations → Approve & Pay → Payouts batch
-- ⬜ Apply webhook events to payout items; status chips in UI
+## Milestone 2 — Tip engine & manager payouts (Tue 3 Nov) ✅ built
+- ✅ `lib/tips/engine.ts`: minutes × weight (BigInt-safe), largest remainder, blockers, traces (26 tests incl. Sam £266.46 / £154.77)
+- ✅ `lib/tips/policy.ts` (version by date) and `lib/tips/flags.ts` (missing / suspicious hours)
+- ✅ Schema M2 amendments + generated migration `0001_milestone2.sql` (see SPEC Amendments 8–15)
+- ✅ Evidence-preserving hour corrections (append-only `time_corrections`, frozen originals)
+- ✅ Save & lock allocation (server recalculation; traces + policy refs stored)
+- ✅ Payout service: approval code, rate limit, kill switch, 3-phase transaction-safe batches, same-id retries
+- ✅ Manual "Refresh status" reconciliation of per-item PayPal statuses (idempotent)
+- ✅ Manager dashboard: overview, shifts, shift review (flags, corrections, AG Grid allocation, approval, payouts), staff, policy
+- ✅ Demo role switcher (view-only gate; not auth); worker page placeholder
+- ✅ PGlite integration tests (25) on the real migrations + seed
+- ✅ Local end-to-end browser run (real server actions over the Postgres wire protocol; wrong codes only, no PayPal calls)
+- 🟡 **Run `db-migrate` then `db-seed`** in GitHub Actions to apply `0001_milestone2.sql` to Supabase
+- 🟡 **Deploy to Render** and test a real sandbox payout through the UI (needs `PAYOUTS_ENABLED`, `MANAGER_APPROVAL_CODE`, `PAYOUT_MAX_ITEM_PENCE=30000`)
+- 🟡 Live Supabase + live PayPal for the dashboard flow — untested until deployed
+
+## Milestone 3 — Deploy, webhooks, worker view & AI explanations (Wed 4 – Fri 6 Nov)
 - ⬜ Deploy to Render; register webhook; set `PAYPAL_WEBHOOK_ID`
-
-## Milestone 3 — Worker view & AI explanations (Fri 6 Nov)
+- ⬜ Webhook → payout item reconciliation (verified, duplicate-safe; reuse `refreshShiftPayoutStatus` logic)
 - ⬜ Worker earnings + shift breakdown
 - ⬜ AI chat with read-only tools (SPEC §6); "why was I paid less" end-to-end
 
 ## Milestone 4 — Flags & pay queries (Sat 7 Nov)
-- ⬜ Missing-hours detection; pay query flow; correction payout
+- ⬜ Pay query flow; separately authorised correction payouts (missing-hours detection done in M2)
 
 ## Milestone 5 — Shift cover, Orders funding, polish (Sun 8 – Mon 9 Nov)
 - ⬜ Cover suggestions; Orders v2 pool funding; AG Grid; Reset demo button

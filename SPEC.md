@@ -176,3 +176,13 @@ Changes made during implementation. Each is additive or a representation detail;
 5. **Database access** via Drizzle ORM (schema in `lib/db/schema.ts` is the source of truth; migrations generated into `/drizzle`).
 6. **Sandbox safety controls:** hard-coded sandbox base URL, recipient allowlist, per-item/per-batch caps with hard ceilings.
 7. **Integration testing** runs from a manual GitHub Actions workflow, as the build environment cannot reach PayPal or Supabase.
+
+**M2 (3 Nov 2026)**
+8. **Hours corrections are evidence-preserving.** New append-only `time_corrections` table (field, original value, new value, actor, reason, timestamp). `shift_assignments` gains `hours_corrected`, `original_clock_in`, `original_clock_out`, frozen at the first correction. Corrections are refused once a payout batch exists; a correction to a locked (closed) shift discards its allocation and reopens it.
+9. **One payout batch per shift.** `payout_batches.shift_id` + `kind` (`shift` | `correction`), with a partial unique index on `shift_id` where `kind = 'shift'`. Correction batches (M4) are separate.
+10. **Send-claim status.** Batch status `sending` plus `send_attempts` and `last_status_check_at`. Payout creation is three-phase (prepare + atomic claim in a locked transaction → send → record); see `lib/payouts/service.ts`.
+11. **Demo pools are labelled.** `tip_pools.is_demo` (seeded pools = true; none funded through PayPal Orders). Seeded shifts all start `open`: nothing is pre-calculated or pre-paid.
+12. **Shift lifecycle.** `open` (hours editable) → `closed` (allocation saved/locked) → `paid` (only when EVERY payout item reports SUCCESS).
+13. **Payout authorisation** (replaces "manager clicks Approve & Pay" in §2): requires `PAYOUTS_ENABLED=true`, a server-checked `MANAGER_APPROVAL_CODE` (≥ 12 chars, constant-time compare), and an attempt rate limit (5 per client / 20 global per 15 min, in-memory). The demo role cookie only controls which views are shown.
+14. **Re-verification before paying.** The saved allocation must equal a fresh engine run on current data, and all PayPal guards (allowlist, per-item cap, batch total) run before anything is persisted.
+15. **Status reconciliation** is manual ("Refresh status", via GET payout batch) in M2. Webhook-driven reconciliation is scheduled for M3 once there is a public URL.

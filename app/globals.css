@@ -3,58 +3,40 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* shadcn/ui tokens — FairShift palette: warm neutral with a deep teal accent */
+/* FairShift design language: deep navy sidebar, white canvas, emerald accents.
+   Light theme only — a fintech dashboard reads best with one consistent palette. */
 :root {
-  --radius: 0.625rem;
-  --background: oklch(0.985 0.004 85);
-  --foreground: oklch(0.2 0.01 60);
+  --radius: 0.75rem;
+  --background: oklch(0.985 0.003 250);
+  --foreground: oklch(0.21 0.035 262);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.2 0.01 60);
+  --card-foreground: oklch(0.21 0.035 262);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.2 0.01 60);
-  --primary: oklch(0.45 0.09 195);
-  --primary-foreground: oklch(0.98 0.01 195);
-  --secondary: oklch(0.95 0.008 85);
-  --secondary-foreground: oklch(0.25 0.01 60);
-  --muted: oklch(0.955 0.006 85);
-  --muted-foreground: oklch(0.5 0.01 60);
-  --accent: oklch(0.94 0.02 195);
-  --accent-foreground: oklch(0.3 0.07 195);
-  --destructive: oklch(0.58 0.22 27);
-  --success: oklch(0.6 0.14 150);
-  --warning: oklch(0.75 0.15 75);
-  --border: oklch(0.91 0.006 85);
-  --input: oklch(0.91 0.006 85);
-  --ring: oklch(0.45 0.09 195);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: oklch(0.17 0.008 60);
-    --foreground: oklch(0.96 0.005 85);
-    --card: oklch(0.21 0.008 60);
-    --card-foreground: oklch(0.96 0.005 85);
-    --popover: oklch(0.21 0.008 60);
-    --popover-foreground: oklch(0.96 0.005 85);
-    --primary: oklch(0.72 0.1 195);
-    --primary-foreground: oklch(0.18 0.02 195);
-    --secondary: oklch(0.26 0.008 60);
-    --secondary-foreground: oklch(0.96 0.005 85);
-    --muted: oklch(0.26 0.008 60);
-    --muted-foreground: oklch(0.7 0.01 60);
-    --accent: oklch(0.3 0.04 195);
-    --accent-foreground: oklch(0.9 0.04 195);
-    --destructive: oklch(0.65 0.2 25);
-    --success: oklch(0.7 0.14 150);
-    --warning: oklch(0.8 0.14 75);
-    --border: oklch(1 0 0 / 12%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.72 0.1 195);
-  }
+  --popover-foreground: oklch(0.21 0.035 262);
+  --primary: oklch(0.596 0.127 163); /* emerald-600 */
+  --primary-foreground: oklch(0.99 0.01 163);
+  --secondary: oklch(0.967 0.006 250);
+  --secondary-foreground: oklch(0.28 0.04 262);
+  --muted: oklch(0.967 0.006 250);
+  --muted-foreground: oklch(0.52 0.025 257);
+  --accent: oklch(0.962 0.04 163);
+  --accent-foreground: oklch(0.42 0.09 163);
+  --destructive: oklch(0.58 0.21 27);
+  --success: oklch(0.596 0.127 163);
+  --warning: oklch(0.72 0.15 70);
+  --info: oklch(0.55 0.15 255);
+  --border: oklch(0.925 0.008 255);
+  --input: oklch(0.9 0.01 255);
+  --ring: oklch(0.596 0.127 163);
+  --sidebar: oklch(0.205 0.05 264); /* deep navy */
+  --sidebar-foreground: oklch(0.86 0.02 260);
+  --sidebar-muted: oklch(0.62 0.03 260);
+  --sidebar-accent: oklch(0.27 0.055 264);
+  --sidebar-border: oklch(0.3 0.04 264);
 }
 
 @theme inline {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -73,6 +55,12 @@
   --color-destructive: var(--destructive);
   --color-success: var(--success);
   --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-muted: var(--sidebar-muted);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-border: var(--sidebar-border);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
