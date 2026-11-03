@@ -1,0 +1,182 @@
+/**
+ * The assistant loop (OpenAI Responses API, server-side function calling).
+ *
+ *   1. Send instructions + capped history + the worker's message + tools.
+ *   2. Execute any function calls with deterministic, worker-scoped tools.
+ *   3. Repeat (bounded) until the model returns its structured answer.
+ *   4. Validate the answer against the fact ledger; one corrective retry;
+ *      otherwise fall back to a deterministic message. The model's own text
+ *      never reaches the worker with an unverified number in it.
+ */
+import type { Db } from "../db/connect";
+import type { PayQueryProposal } from "../payqueries/commands";
+import { FactLedger } from "./facts";
+import { LIMITS } from "./limits";
+import { ANSWER_SCHEMA, systemPrompt } from "./prompt";
+import { executeTool, TOOLS, type ToolContext } from "./tools";
+import { evidenceCards, validateAnswer, type EvidenceCard, type Segment } from "./validate";
+
+/** The minimal slice of the Responses API we use (lets tests inject a fake model). */
+export type ModelOutputItem =
+  | { type: "function_call"; name: string; arguments: string; call_id: string; [k: string]: unknown }
+  | { type: "message"; content?: Array<{ type: string; text?: string }>; [k: string]: unknown }
+  | { type: string; [k: string]: unknown };
+
+export type ModelResponse = { output: ModelOutputItem[]; output_text?: string; usage?: { input_tokens?: number; output_tokens?: number } | null };
+
+export type ModelClient = { create(params: Record<string, unknown>): Promise<ModelResponse> };
+
+export type ChatTurn = { role: "user" | "assistant"; content: string };
+
+export type AssistantResult = {
+  segments: Segment[];
+  evidence: EvidenceCard[];
+  proposal: PayQueryProposal | null;
+  offerPayQuery: boolean;
+  toolCalls: Array<{ name: string; ok: boolean }>;
+  verified: boolean;
+  fallback: boolean;
+  usage: { inputTokens: number; outputTokens: number; modelCalls: number };
+  /** Why the model's answer was rejected (server logs / ai-check only; never shown). */
+  violations?: string[];
+};
+
+function textOf(resp: ModelResponse): string {
+  if (typeof resp.output_text === "string" && resp.output_text) return resp.output_text;
+  return resp.output
+    .filter((o) => o.type === "message")
+    .flatMap((o) => ((o as { content?: Array<{ type: string; text?: string }> }).content ?? []).map((c) => c.text ?? ""))
+    .join("");
+}
+
+export function sanitizeHistory(history: ChatTurn[]): ChatTurn[] {
+  const recent = history.filter((t) => (t.role === "user" || t.role === "assistant") && typeof t.content === "string").slice(-LIMITS.maxHistoryMessages);
+  let budget = LIMITS.maxHistoryChars;
+  const out: ChatTurn[] = [];
+  for (const t of recent.reverse()) {
+    const c = t.content.slice(0, 1500);
+    if (budget - c.length < 0) break;
+    budget -= c.length;
+    out.unshift({ role: t.role, content: c });
+  }
+  return out;
+}
+
+export async function runAssistant(args: {
+  db: Db;
+  workerId: string;
+  workerFirstName: string;
+  history: ChatTurn[];
+  message: string;
+  client: ModelClient;
+  model: string;
+}): Promise<AssistantResult> {
+  const ledger = new FactLedger();
+  const ctx: ToolContext = { db: args.db, workerId: args.workerId, ledger, proposals: [] };
+  const toolCalls: AssistantResult["toolCalls"] = [];
+  const usage = { inputTokens: 0, outputTokens: 0, modelCalls: 0 };
+
+  const input: unknown[] = [
+    ...sanitizeHistory(args.history).map((t) => ({ role: t.role, content: t.content })),
+    { role: "user", content: args.message.slice(0, LIMITS.maxMessageChars) },
+  ];
+
+  const baseParams = {
+    model: args.model,
+    instructions: systemPrompt(args.workerFirstName),
+    tools: TOOLS.map((t) => ({ type: "function", name: t.name, description: t.description, parameters: t.parameters, strict: true })),
+    tool_choice: "auto",
+    parallel_tool_calls: true,
+    text: { format: { type: "json_schema", name: "fairshift_answer", schema: ANSWER_SCHEMA, strict: true } },
+    reasoning: { effort: "low" },
+    max_output_tokens: LIMITS.maxOutputTokens,
+    // Stateless: nothing stored at OpenAI; reasoning is passed back encrypted.
+    store: false,
+    include: ["reasoning.encrypted_content"],
+  };
+
+  let retried = false;
+  let lastViolations: string[] = [];
+
+  for (let round = 0; round < LIMITS.maxToolRounds; round++) {
+    const resp = await args.client.create({ ...baseParams, input });
+    usage.modelCalls++;
+    usage.inputTokens += resp.usage?.input_tokens ?? 0;
+    usage.outputTokens += resp.usage?.output_tokens ?? 0;
+
+    const calls = resp.output.filter((o): o is Extract<ModelOutputItem, { type: "function_call" }> => o.type === "function_call");
+    if (calls.length) {
+      input.push(...resp.output);
+      for (const call of calls) {
+        let output: unknown;
+        if (toolCalls.length >= LIMITS.maxToolCalls) {
+          output = { error: "Tool call limit reached for this message. Answer with what you have." };
+          toolCalls.push({ name: String(call.name), ok: false });
+        } else {
+          const r = await executeTool(ctx, String(call.name), String(call.arguments ?? "{}"));
+          output = r.output;
+          toolCalls.push({ name: String(call.name), ok: r.ok });
+        }
+        input.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify(output) });
+      }
+      continue;
+    }
+
+    // Final answer.
+    let parsed: { answer?: unknown; cited_fact_ids?: unknown; offer_pay_query?: unknown } = {};
+    try {
+      parsed = JSON.parse(textOf(resp));
+    } catch {
+      parsed = {};
+    }
+    const answer = typeof parsed.answer === "string" ? parsed.answer : "";
+    const v = validateAnswer(answer, ledger);
+    if (v.ok) {
+      const cited = Array.isArray(parsed.cited_fact_ids) ? parsed.cited_fact_ids.map(String) : [];
+      const extra = cited.map((id) => ledger.get(id)).filter((f): f is NonNullable<typeof f> => Boolean(f));
+      const facts = [...v.usedFacts, ...extra.filter((f) => !v.usedFacts.includes(f))];
+      return {
+        segments: v.segments,
+        evidence: evidenceCards(facts),
+        proposal: ctx.proposals[0] ?? null,
+        offerPayQuery: parsed.offer_pay_query === true,
+        toolCalls,
+        verified: true,
+        fallback: false,
+        usage,
+      };
+    }
+    lastViolations = v.violations;
+    if (retried) break;
+    retried = true;
+    input.push(...resp.output);
+    input.push({
+      role: "user",
+      content:
+        "[FairShift system check — not from the worker] Your answer was rejected because " +
+        v.violations.slice(0, 5).join("; ") +
+        ". Rewrite it using ONLY [[fN]] placeholders from this turn's tool results for every amount, time, duration, percentage, status or id. Call tools again if you need facts.",
+    });
+  }
+
+  // Deterministic fallback: never show unverified model text.
+  const facts = ledger.all().filter((f) => f.kind === "money" || f.kind === "status" || f.kind === "minutes");
+  return {
+    segments: [
+      {
+        type: "text",
+        text:
+          "Sorry — I couldn't put together an answer I could fully verify against your records, so I'm not showing it. " +
+          (facts.length ? "Here are the records I checked:" : "Please try asking in a different way."),
+      },
+    ],
+    evidence: evidenceCards(facts.slice(0, 12)),
+    proposal: ctx.proposals[0] ?? null,
+    offerPayQuery: false,
+    toolCalls,
+    verified: false,
+    fallback: true,
+    usage,
+    violations: lastViolations,
+  };
+}

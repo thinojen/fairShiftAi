@@ -8,13 +8,15 @@ name: Integration (manual)
 #   paypal-test-payout  sends ONE £1.00 SANDBOX payout — only if "confirm_payout" is ticked.
 #   db-migrate          applies generated SQL migrations to Supabase.
 #   db-seed             wipes + reseeds synthetic demo data. Never touches PayPal.
+#   ai-check            REAL OpenAI test of the assistant on an in-memory database.
+#                       Never touches Supabase or PayPal. Costs a few cents of API usage.
 on:
   workflow_dispatch:
     inputs:
       task:
         description: What to run
         type: choice
-        options: [paypal-check, paypal-test-payout, db-migrate, db-seed]
+        options: [paypal-check, paypal-test-payout, db-migrate, db-seed, ai-check]
         default: paypal-check
       confirm_payout:
         description: "paypal-test-payout only — tick to really send £1.00 in the PayPal SANDBOX"
@@ -81,3 +83,10 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           PAYPAL_SANDBOX_RECIPIENTS: ${{ secrets.PAYPAL_SANDBOX_RECIPIENTS }}
         run: npm run db:seed
+
+      - name: AI assistant check (real OpenAI, in-memory DB)
+        if: inputs.task == 'ai-check'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+        run: npm run ai:check

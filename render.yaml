@@ -22,7 +22,18 @@ services:
         value: "30000"
       - key: PAYOUT_MAX_BATCH_PENCE
         value: "100000"
+      # ---- AI assistant ----
+      - key: OPENAI_MODEL
+        value: gpt-5.4-mini
+      - key: AI_ENABLED
+        value: "true"
+      - key: AI_DAILY_LIMIT
+        value: "200"
       # ---- secrets: Render asks for these when you create the Blueprint ----
+      # (sync:false is only prompted on FIRST creation — on an existing service,
+      #  add OPENAI_API_KEY manually under Environment.)
+      - key: OPENAI_API_KEY
+        sync: false
       - key: DATABASE_URL
         sync: false
       - key: PAYPAL_SANDBOX_RECIPIENTS

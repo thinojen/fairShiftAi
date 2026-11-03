@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CalendarClock, LayoutDashboard, ScrollText, ShieldCheck, Users, Wallet } from "lucide-react";
+import { CalendarClock, Inbox, LayoutDashboard, PiggyBank, ScrollText, ShieldCheck, Users, Wallet } from "lucide-react";
 import { switchRoleAction } from "@/app/actions";
 import { NavLink } from "@/components/nav-link";
 import { DEMO_ROLES, roleValue, type DemoRole } from "@/lib/demo/role";
@@ -7,6 +7,7 @@ import { DEMO_ROLES, roleValue, type DemoRole } from "@/lib/demo/role";
 const NAV = [
   { href: "/manager", label: "Overview", icon: LayoutDashboard },
   { href: "/manager/shifts", label: "Shifts & payouts", icon: CalendarClock },
+  { href: "/manager/queries", label: "Pay queries", icon: Inbox },
   { href: "/manager/staff", label: "Staff", icon: Users },
   { href: "/manager/policy", label: "Tip policy", icon: ScrollText },
 ];
@@ -15,7 +16,7 @@ export function AppShell({ role, children }: { role: DemoRole; children: React.R
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
       <aside className="bg-sidebar text-sidebar-foreground flex shrink-0 flex-col md:sticky md:top-0 md:h-screen md:w-64">
-        <Link href="/manager" className="flex items-center gap-2.5 px-5 py-5">
+        <Link href={role.kind === "manager" ? "/manager" : "/worker"} className="flex items-center gap-2.5 px-5 py-5">
           <span className="bg-primary flex size-8 items-center justify-center rounded-lg text-white">
             <Wallet className="size-4" />
           </span>
@@ -23,6 +24,14 @@ export function AppShell({ role, children }: { role: DemoRole; children: React.R
           <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-white/70 uppercase">AI</span>
         </Link>
 
+        {role.kind === "worker" && (
+          <nav className="flex gap-1 overflow-x-auto px-3 pb-3 md:flex-col md:pb-0">
+            <NavLink href="/worker" exact>
+              <PiggyBank className="size-4" />
+              My earnings
+            </NavLink>
+          </nav>
+        )}
         {role.kind === "manager" && (
           <nav className="flex gap-1 overflow-x-auto px-3 pb-3 md:flex-col md:pb-0">
             {NAV.map((n) => (

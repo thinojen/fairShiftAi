@@ -29,6 +29,13 @@
       "when": 1793730255372,
       "tag": "0003_protect_payment_history",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793734180385,
+      "tag": "0004_pay_queries_workflow",
+      "breakpoints": true
     }
   ]
 }

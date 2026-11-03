@@ -44,14 +44,25 @@ Legend: ✅ done & verified · 🟡 built, needs external credentials to verify 
 - 🟡 **Run `db-migrate`** in Actions (applies 0002 + 0003). Do NOT run `db-seed` unless you want a fresh demo — it is safe, but not needed
 - 🟡 **Deploy on Render** (README → "Deploying to Render")
 
-## Milestone 3 — Webhooks, worker view & AI explanations (Wed 4 – Fri 6 Nov)
-- ⬜ Register webhook on the Render URL; set `PAYPAL_WEBHOOK_ID`
-- ⬜ Webhook → payout item reconciliation (verified, duplicate-safe; reuse `refreshShiftPayoutStatus` logic)
-- ⬜ Worker earnings + shift breakdown
-- ⬜ AI chat with read-only tools (SPEC §6); "why was I paid less" end-to-end
+## Milestone 3 — Worker dashboard, AI assistant, pay queries (Tue 3 Nov) ✅ built
+- ✅ **Verified by user:** deployed at https://fairshift-ai.onrender.com/ with `PAYOUTS_ENABLED=false`
+- ✅ Worker read model: blocked / provisional / allocated / paid / needs-review states; other workers never named
+- ✅ Fixed-order counterfactual comparison (Sam −£111.69 = −£54.13 −£27.04 −£30.52), BigInt, exact
+- ✅ Worker dashboard: earnings overview, this-Friday-vs-last-Friday card, shifts with breakdowns, payment history, pay queries, mobile layout
+- ✅ AI assistant: OpenAI Responses API, 7 scoped read-only tools, structured output, fact ledger, answer validation, evidence cards
+- ✅ Pay queries: proposal (AI) → Create draft (worker click) → Send to manager (worker click) → Accept / Not upheld / Resolve (manager); audited; one open query per shift
+- ✅ Manager pay-query inbox with code-built evidence
+- ✅ Limits + `AI_ENABLED` kill switch; ESLint bans PayPal imports in AI code
+- ✅ Tests: 150+ (tools on PGlite, fake-model loop, validation, injection, scoping, duplicates, state machine)
+- ✅ Local end-to-end run on real PostgreSQL with a mock Responses API (full Sam flow incl. manager inbox)
+- 🟡 **Run `db-migrate`** in Actions (applies `0004_pay_queries_workflow.sql`)
+- 🟡 **Add `OPENAI_API_KEY` secret** in GitHub and **run `ai-check`** — the real OpenAI test (7 scenarios)
+- 🟡 **Add `OPENAI_API_KEY`** (+ AI vars) on Render and try Sam's questions on the live site
+- ⬜ Webhook → payout item reconciliation (moved to Milestone 4)
 
-## Milestone 4 — Flags & pay queries (Sat 7 Nov)
-- ⬜ Pay query flow; separately authorised correction payouts (missing-hours detection done in M2)
+## Milestone 4 — Webhooks & corrections (Wed 4 – Sat 7 Nov)
+- ⬜ Register PayPal webhook on the Render URL; apply verified item events (reuse reconciliation)
+- ⬜ Separately authorised correction payouts linked to resolved pay queries
 
 ## Milestone 5 — Shift cover, Orders funding, polish (Sun 8 – Mon 9 Nov)
 - ⬜ Cover suggestions; Orders v2 pool funding; AG Grid; Reset demo button

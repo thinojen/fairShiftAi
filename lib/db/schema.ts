@@ -70,12 +70,20 @@ export const flagTypeEnum = pgEnum("flag_type", [
   "break_missing",
 ]);
 export const flagStatusEnum = pgEnum("flag_status", ["open", "resolved"]);
+/**
+ * Pay query lifecycle (validated server-side in lib/payqueries/commands.ts):
+ *   draft → submitted → accepted → resolved
+ *   submitted → rejected
+ * Accepting or resolving never changes hours, allocations or payments.
+ */
 export const payQueryStatusEnum = pgEnum("pay_query_status", [
   "draft",
   "submitted",
-  "approved",
+  "accepted",
+  "resolved",
   "rejected",
 ]);
+export const OPEN_PAY_QUERY_STATUSES = ["draft", "submitted", "accepted"] as const;
 
 // ---------- core ----------
 export const venues = pgTable("venues", {
@@ -283,18 +291,46 @@ export const flags = pgTable("flags", {
   createdAt: createdAt(),
 });
 
-export const payQueries = pgTable("pay_queries", {
-  id: id(),
-  workerId: text("worker_id").notNull().references(() => workers.id, { onDelete: "restrict" }),
-  allocationId: text("allocation_id").notNull().references(() => allocations.id),
-  workerMessage: text("worker_message").notNull(),
-  aiSummary: text("ai_summary"),
-  evidenceJson: jsonb("evidence_json"),
-  status: payQueryStatusEnum("status").notNull().default("draft"),
-  resolutionNote: text("resolution_note"),
-  correctionPayoutId: text("correction_payout_id").references(() => payouts.id),
-  createdAt: createdAt(),
-});
+export const payQueries = pgTable(
+  "pay_queries",
+  {
+    id: id(),
+    workerId: text("worker_id").notNull().references(() => workers.id, { onDelete: "restrict" }),
+    /** The disputed shift record. */
+    shiftAssignmentId: text("shift_assignment_id")
+      .notNull()
+      .references(() => shiftAssignments.id, { onDelete: "restrict" }),
+    /**
+     * Historical reference to the allocation locked when the query was raised (if any).
+     * Deliberately NOT a foreign key: the manager may later correct hours, which
+     * replaces that allocation. A snapshot of it is kept in evidence_json.
+     */
+    allocationId: text("allocation_id"),
+    field: correctionFieldEnum("field").notNull(),
+    /** What the record said when the query was raised (ISO timestamp / minutes / null if missing). */
+    recordedValue: text("recorded_value"),
+    /** What the worker says it should be. A CLAIM — never applied automatically. */
+    claimedValue: text("claimed_value").notNull(),
+    workerMessage: text("worker_message").notNull(),
+    aiSummary: text("ai_summary"),
+    /** Deterministic evidence pack built by code, not the AI. */
+    evidenceJson: jsonb("evidence_json"),
+    status: payQueryStatusEnum("status").notNull().default("draft"),
+    resolutionNote: text("resolution_note"),
+    reviewedBy: text("reviewed_by"),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    correctionPayoutId: text("correction_payout_id").references(() => payouts.id),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  // One OPEN query per worker per shift record. Rejected/resolved ones don't block a new query.
+  (t) => [
+    uniqueIndex("pay_queries_one_open_per_shift")
+      .on(t.workerId, t.shiftAssignmentId)
+      .where(sql`${t.status} in ('draft', 'submitted', 'accepted')`),
+  ],
+);
 
 export const auditLog = pgTable("audit_log", {
   id: id(),

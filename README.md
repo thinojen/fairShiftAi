@@ -6,13 +6,33 @@ A manager closes a service; FairShift flags missing hours, splits the tip pool u
 
 Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/). UK context: the Employment (Allocation of Tips) Act 2023 requires employers who handle tips to allocate them fairly, keep a written policy and keep records — FairShift produces that audit trail.
 
-> **Status: Milestone 2.** Manager dashboard, tip engine and approved sandbox payouts are built. The worker view and AI assistant are next — see [TASKS.md](TASKS.md).
+> **Status: Milestone 3.** Manager dashboard, tip engine, approved sandbox payouts, the worker dashboard and the AI assistant are built — see [TASKS.md](TASKS.md). Live demo: https://fairshift-ai.onrender.com/
 
 ## What works today
 - **Deterministic tip engine** — minutes worked × role weight under a written, versioned policy; whole pence; leftover pennies to the largest remainders; always sums exactly to the pool. Blocks if hours are missing.
 - **Manager dashboard** — shifts, tip pools, policy versions, missing-hours warnings, audited hour corrections, and an AG Grid allocation preview.
 - **Approval workflow** — lock the allocation, then approve with a server-checked approval code. Payouts go to PayPal Payouts (sandbox) as one idempotent batch per shift.
 - **Per-worker payment status** — "Refresh status" reads each payout item from PayPal; a worker shows as **Paid** only when their own item reports SUCCESS.
+- **Worker dashboard** — earnings split into *Paid via PayPal*, *Allocated* (locked, not paid) and *Provisional* (may change); a "this Friday vs last Friday" breakdown; shift-by-shift explanations; payment history; pay queries.
+- **AI assistant** — ask "Why were my tips lower last Friday?" or "Have I been paid?". It investigates your records with tools and explains — it never calculates, changes records or moves money.
+- **AI-assisted pay queries** — say "I actually worked an extra hour" and the assistant prepares a query with evidence. *You* click to create the draft and to send it; the manager reviews it in an inbox.
+
+## How the AI is kept honest
+> **AI investigates and explains. Deterministic code calculates. Humans authorise. PayPal moves the money.**
+
+1. **Tools, not guesses.** The assistant (OpenAI Responses API, server-side function calling) can only call 7 read-only tools: `get_worker_shifts`, `get_tip_pool`, `get_policy`, `get_allocation_breakdown`, `get_payout_status`, `compare_periods`, `create_pay_query` (builds a *proposal*; saves nothing). None take a worker id — the server scopes every call to the current demo worker.
+2. **A fact ledger.** Every amount, time, status or PayPal id a tool returns is registered with the record it came from. The model must refer to values as `[[fact]]` placeholders in a structured answer.
+3. **Answer validation.** Any raw money, percentage, duration, clock time, id — or a "you've been paid" claim without a successful PayPal payout — is rejected. One retry, then a safe fallback. The browser shows values from the ledger as highlighted chips, plus evidence cards built by code.
+4. **Precomputed comparisons.** "Why did I earn less?" is answered from a fixed-order counterfactual computed in TypeScript (pool → your points → rest of team). For Sam: −£54.13, −£27.04, −£30.52 = −£111.69.
+5. **Humans click.** Drafting and sending a pay query are explicit worker clicks; accepting/resolving are manager actions; none of them change hours or pay.
+6. **Spending limits.** Per-IP and global rate limits, a daily cap (`AI_DAILY_LIMIT`), token/tool-call limits and an `AI_ENABLED` kill switch. These counters are in memory: best-effort, and they reset when Render restarts.
+
+## Demo script — Sam's two Fridays
+1. **View as → Sam.** Fri 30 Oct is **Blocked** (missing clock-out). Ask *"Why were my tips lower last Friday?"* — the assistant explains it can't compare yet.
+2. **View as → Manager → Shifts → Fri 30 Oct → Fix hours** (clock-out 23:30, with a reason). Optionally **Save & lock** both Fridays.
+3. **Back to Sam.** The card shows **−£111.69** (£266.46 → £154.77). Ask again — the assistant walks through the pool, hours and team changes, and says whether the figure is provisional or allocated (never "paid").
+4. Say *"But I actually worked an extra hour!"* → the assistant prepares a pay query → **Create draft** → **Send to manager**.
+5. **Manager → Pay queries** → review the evidence → **Accept** → correct the hours on the shift page → **Mark resolved**.
 
 ## Design principles
 - **The AI never touches the money.** All tip maths is deterministic, integer-pence code with unit tests. The AI reads records through tools and explains them.
@@ -31,7 +51,8 @@ Next.js 16 · TypeScript · Tailwind + shadcn/ui · Drizzle ORM · Supabase Post
 | Orders v2 | funding the tip pool | ⬜ planned |
 
 ## AI tools used
-*To be completed in Milestone 3* (OpenAI tool calling, read-only tools listed in [SPEC.md §6](SPEC.md)). This project is also being built with Claude Code as a coding assistant.
+- **OpenAI Responses API** (`gpt-5.4-mini` by default, configurable) with server-side function calling and structured outputs — powers the worker assistant. See "How the AI is kept honest" above.
+- **Claude Code** — used as a coding assistant to build the project.
 
 ## ⚠️ Demo mode & limitations
 This is a hackathon demo, not production software.
@@ -57,7 +78,11 @@ The repo includes a Render Blueprint (`render.yaml`) for the **public demo**: pa
 | `PAYOUT_MAX_ITEM_PENCE` / `PAYOUT_MAX_BATCH_PENCE` | `30000` / `100000` | set by the Blueprint |
 | `NODE_VERSION` | `22` | set by the Blueprint |
 | `MANAGER_APPROVAL_CODE` | **do not set** | the public demo must not be able to pay |
-| `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET` | not needed yet | added in Milestone 3 for webhooks |
+| `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET` | not needed yet | added in Milestone 4 for webhooks |
+| `OPENAI_API_KEY` | your OpenAI key | **secret** — server-side only |
+| `OPENAI_MODEL` | `gpt-5.4-mini` | set by the Blueprint |
+| `AI_ENABLED` | `true` (`false` = kill switch) | set by the Blueprint |
+| `AI_DAILY_LIMIT` | `200` | set by the Blueprint |
 
 ### Render step by step
 1. Sign in at [render.com](https://render.com) with GitHub.
@@ -89,6 +114,7 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 | `PAYPAL_SANDBOX_RECIPIENTS` | Comma-separated sandbox personal emails (Sam, Priya, Jordan, Alex, Casey) |
 | `DATABASE_URL` | Supabase **session pooler** URI (port 5432) |
 | `PAYPAL_WEBHOOK_ID` | *(later, after deploying)* |
+| `OPENAI_API_KEY` | for the `ai-check` task |
 
 The app itself (e.g. on Render) also needs `PAYOUT_MAX_ITEM_PENCE=30000`, and — only where real sandbox payouts should be possible — `PAYOUTS_ENABLED=true` and `MANAGER_APPROVAL_CODE`.
 
@@ -97,7 +123,8 @@ Repo → **Actions → Integration (manual) → Run workflow**, choose a task:
 - `paypal-check` — read-only check of auth, Payouts permission and API access. **Moves no money.**
 - `paypal-test-payout` — sends one £1.00 **sandbox** payout. Does nothing unless **confirm_payout** is ticked. To retry safely, paste the `sender_batch_id` from the previous run's log into **batch_id**.
 - `db-migrate` — applies the database schema. Run it after pulling a new migration (Milestone 2 adds `0001_milestone2.sql`).
-- `db-seed` — loads synthetic demo data (no PayPal calls).
+- `db-seed` — loads synthetic demo data (no PayPal calls). Refuses once payment history or pay queries exist.
+- `ai-check` — the **real OpenAI test**: runs 7 scenarios (blocked shift, provisional and locked comparisons, no payout, extra-hour claim, cross-worker request, prompt injection) on an **in-memory** database. Never touches Supabase or PayPal. Needs the `OPENAI_API_KEY` secret (optional repository *variable* `OPENAI_MODEL`).
 
 Open the run and click the job to read the output. Secrets are masked in logs.
 
@@ -119,6 +146,7 @@ npm run paypal:test-payout -- --confirm
 | `npm run db:migrate` · `npm run db:seed` | Apply schema · load demo data |
 | `npm run paypal:check` | Read-only PayPal feasibility check |
 | `npm run paypal:test-payout -- --confirm [--batch-id ID]` | One £1.00 sandbox payout |
+| `npm run ai:check` | Real OpenAI assistant test on an in-memory database |
 
 ## License
 [MIT](LICENSE)
