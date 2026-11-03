@@ -114,7 +114,7 @@ export function toChatRequest(params: JsonObject, opts: { model: string; withRes
   const effort = (params.reasoning as { effort?: string } | undefined)?.effort;
   if (effort) req.reasoning_effort = effort;
   // Gemini counts thinking toward the budget; leave room so answers aren't truncated.
-  if (typeof params.max_output_tokens === "number") req.max_tokens = Math.max(params.max_output_tokens, 2048);
+  if (typeof params.max_output_tokens === "number") req.max_tokens = Math.max(params.max_output_tokens, 4096);
   return req;
 }
 
@@ -123,6 +123,7 @@ let callCounter = 0;
 /** Chat Completions response → our Responses-style output. Pure (aside from fallback ids). */
 export function fromChatResponse(resp: ChatResponse, wantJson: boolean): ModelResponse {
   const msg = resp.choices?.[0]?.message;
+  const finish_reason = resp.choices?.[0]?.finish_reason ?? null;
   if (!msg) throw new AiProviderError("AI returned no message", "unavailable");
   const usage = { input_tokens: resp.usage?.prompt_tokens ?? 0, output_tokens: resp.usage?.completion_tokens ?? 0 };
 
@@ -142,7 +143,7 @@ export function fromChatResponse(resp: ChatResponse, wantJson: boolean): ModelRe
       arguments: String((tc.function as { arguments?: string })?.arguments ?? "{}"),
       [RAW]: raw,
     }));
-    return { output, output_text: "", usage };
+    return { output, output_text: "", usage, finish_reason };
   }
 
   const text = typeof msg.content === "string" ? msg.content : "";
@@ -151,6 +152,7 @@ export function fromChatResponse(resp: ChatResponse, wantJson: boolean): ModelRe
     output: [{ type: "message", content: [{ type: "output_text", text }], [RAW]: raw }],
     output_text: wantJson ? extractJsonText(text) : text,
     usage,
+    finish_reason,
   };
 }
 

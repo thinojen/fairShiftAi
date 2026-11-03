@@ -56,3 +56,24 @@ export class FactLedger {
     return this.all().some((f) => f.kind === "status" && f.source.type === "payout" && f.value === "success");
   }
 }
+
+/** The single-string form the MODEL sees for a fact: [[f12|−£111.69]]. */
+export function factToken(id: string, display: string) {
+  return `[[${id}|${display}]]`;
+}
+
+/**
+ * Serialise a tool result for the model: every {fact, display} pair becomes one
+ * self-verifying token string, so the model can copy it verbatim instead of
+ * re-typing the value. The validator checks the text after "|" against the ledger.
+ */
+export function toModelPayload(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(toModelPayload);
+  if (value && typeof value === "object") {
+    const o = value as Record<string, unknown>;
+    const keys = Object.keys(o);
+    if (keys.length === 2 && typeof o.fact === "string" && typeof o.display === "string") return factToken(o.fact, o.display);
+    return Object.fromEntries(keys.map((k) => [k, toModelPayload(o[k])]));
+  }
+  return value;
+}

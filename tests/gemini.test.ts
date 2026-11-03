@@ -83,7 +83,8 @@ const fixSam = () =>
 const factOf = (toolMsg: Record<string, unknown>, path: string[]) => {
   let v: unknown = JSON.parse(String(toolMsg.content));
   for (const k of path) v = (v as Record<string, unknown>)[k];
-  return (v as { fact: string }).fact;
+  // Model-facing tool output carries tokens like [[f3|−£111.69]]; return the id.
+  return /^\[\[(f\d+)\|/.exec(String(v))![1];
 };
 
 // ---------------------------------------------------------------------------
@@ -307,7 +308,7 @@ describe("schema dialect + request mapping (pure)", () => {
       { role: "assistant", content: "a1" },
       { role: "user", content: "q2" },
     ]);
-    expect(req).toMatchObject({ reasoning_effort: "low", max_tokens: 2048 });
+    expect(req).toMatchObject({ reasoning_effort: "low", max_tokens: 4096 });
     expect(req).not.toHaveProperty("response_format");
   });
 

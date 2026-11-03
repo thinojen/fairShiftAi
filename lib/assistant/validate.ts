@@ -10,7 +10,31 @@ export type Segment = { type: "text"; text: string } | { type: "fact"; factId: s
 
 export type Validation = { ok: true; segments: Segment[]; usedFacts: Fact[] } | { ok: false; violations: string[] };
 
-const PLACEHOLDER = /\[\[\s*(f\d{1,4})\s*\]\]/g;
+/** Count fact references for diagnostics (no values). */
+export function placeholderStats(answer: string, ledger: FactLedger) {
+  let total = 0;
+  let unknown = 0;
+  let altered = 0;
+  for (const m of answer.matchAll(PLACEHOLDER)) {
+    total++;
+    const f = ledger.get(m[1]);
+    if (!f) unknown++;
+    else if (m[2] !== undefined && normaliseValue(m[2]) !== normaliseValue(f.display)) altered++;
+  }
+  return { total, unknown, altered };
+}
+
+/**
+ * Accepted fact references:
+ *   [[f12]]               — id only
+ *   [[f12|−£111.69]]      — id + value, copied from the tool result. The value must
+ *                           EXACTLY equal the ledger's display (only ASCII "-" vs "−"
+ *                           is tolerated); otherwise the answer is rejected.
+ * Whatever the model wrote, the rendered value always comes from the ledger.
+ */
+const PLACEHOLDER = /\[\[\s*(f\d{1,4})\s*(?:\|([^\]\n]{0,120}))?\]\]/g;
+
+const normaliseValue = (v: string) => v.trim().replace(/-/g, "−").replace(/\s+/g, " ");
 
 const RAW_RULES: Array<[RegExp, string]> = [
   [/£|€|\$|\bGBP\b|\bUSD\b/i, "a currency amount written directly"],
@@ -39,8 +63,15 @@ export function validateAnswer(answer: string, ledger: FactLedger): Validation {
   const used: Fact[] = [];
   for (const m of answer.matchAll(PLACEHOLDER)) {
     const f = ledger.get(m[1]);
-    if (!f) violations.push(`[[${m[1]}]] is not a fact returned by a tool in this turn`);
-    else if (!used.includes(f)) used.push(f);
+    if (!f) {
+      violations.push(`[[${m[1]}]] is not a fact returned by a tool in this turn`);
+      continue;
+    }
+    if (m[2] !== undefined && normaliseValue(m[2]) !== normaliseValue(f.display)) {
+      violations.push(`[[${m[1]}|…]] changes the verified value — copy the token exactly as the tool returned it`);
+      continue;
+    }
+    if (!used.includes(f)) used.push(f);
   }
 
   const prose = answer.replace(PLACEHOLDER, " ");

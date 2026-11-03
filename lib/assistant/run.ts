@@ -10,11 +10,11 @@
  */
 import type { Db } from "../db/connect";
 import type { PayQueryProposal } from "../payqueries/commands";
-import { FactLedger } from "./facts";
+import { factToken, FactLedger, toModelPayload } from "./facts";
 import { LIMITS } from "./limits";
 import { ANSWER_SCHEMA, systemPrompt } from "./prompt";
 import { executeTool, TOOLS, type ToolContext } from "./tools";
-import { evidenceCards, validateAnswer, type EvidenceCard, type Segment } from "./validate";
+import { evidenceCards, placeholderStats, validateAnswer, type EvidenceCard, type Segment } from "./validate";
 
 /** The minimal slice of the Responses API we use (lets tests inject a fake model). */
 export type ModelOutputItem =
@@ -22,7 +22,23 @@ export type ModelOutputItem =
   | { type: "message"; content?: Array<{ type: string; text?: string }>; [k: string]: unknown }
   | { type: string; [k: string]: unknown };
 
-export type ModelResponse = { output: ModelOutputItem[]; output_text?: string; usage?: { input_tokens?: number; output_tokens?: number } | null };
+export type ModelResponse = {
+  output: ModelOutputItem[];
+  output_text?: string;
+  usage?: { input_tokens?: number; output_tokens?: number } | null;
+  /** Provider's stop reason when available (e.g. "stop", "length"). */
+  finish_reason?: string | null;
+};
+
+/** Sanitised record of each final-answer attempt (no keys; ids masked). */
+export type AnswerAttempt = {
+  finishReason: string | null;
+  textChars: number;
+  jsonValid: boolean;
+  shapeValid: boolean;
+  placeholders: { total: number; unknown: number; altered: number };
+  violations: string[];
+};
 
 export type ModelClient = { create(params: Record<string, unknown>): Promise<ModelResponse> };
 
@@ -39,7 +55,14 @@ export type AssistantResult = {
   usage: { inputTokens: number; outputTokens: number; modelCalls: number };
   /** Why the model's answer was rejected (server logs / ai-check only; never shown). */
   violations?: string[];
+  /** Per-attempt diagnostics (server logs / ai-check only; never shown). */
+  attempts: AnswerAttempt[];
 };
+
+/** Mask anything id-like so diagnostics never print payment references. */
+export function sanitiseDiagnostic(text: string) {
+  return text.replace(/\b(?=[A-Z0-9_-]*\d)[A-Z0-9_-]{10,}\b/g, "[id]").slice(0, 300);
+}
 
 function textOf(resp: ModelResponse): string {
   if (typeof resp.output_text === "string" && resp.output_text) return resp.output_text;
@@ -117,6 +140,7 @@ export async function runAssistant(args: {
 
   let retried = false;
   let lastViolations: string[] = [];
+  const attempts: AnswerAttempt[] = [];
 
   for (let round = 0; round < LIMITS.maxToolRounds; round++) {
     const resp = await args.client.create({ ...baseParams, input });
@@ -137,16 +161,32 @@ export async function runAssistant(args: {
           output = r.output;
           toolCalls.push({ name: String(call.name), ok: r.ok });
         }
-        input.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify(output) });
+        // Values reach the model as self-verifying tokens like [[f12|−£111.69]].
+        input.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify(toModelPayload(output)) });
       }
       continue;
     }
 
     // Final answer: must be JSON matching ANSWER_SCHEMA exactly, then pass the fact-ledger checks.
-    const shape = parseAnswerShape(textOf(resp));
+    const text = textOf(resp);
+    const shape = parseAnswerShape(text);
     const parsed = shape.ok ? shape.value : { answer: "", cited_fact_ids: [], offer_pay_query: false };
     const answer = parsed.answer;
     const v: ReturnType<typeof validateAnswer> = shape.ok ? validateAnswer(answer, ledger) : { ok: false, violations: [shape.error] };
+    let jsonValid = true;
+    try {
+      JSON.parse(text);
+    } catch {
+      jsonValid = false;
+    }
+    attempts.push({
+      finishReason: resp.finish_reason ?? null,
+      textChars: text.length,
+      jsonValid,
+      shapeValid: shape.ok,
+      placeholders: placeholderStats(answer, ledger),
+      violations: v.ok ? [] : v.violations.map(sanitiseDiagnostic),
+    });
     if (v.ok) {
       const cited = parsed.cited_fact_ids;
       const extra = cited.map((id) => ledger.get(id)).filter((f): f is NonNullable<typeof f> => Boolean(f));
@@ -160,18 +200,26 @@ export async function runAssistant(args: {
         verified: true,
         fallback: false,
         usage,
+        attempts,
       };
     }
     lastViolations = v.violations;
     if (retried) break;
     retried = true;
     input.push(...resp.output);
+    // Corrective retry: say exactly what was wrong and list the tokens that ARE available.
+    const available = ledger
+      .all()
+      .filter((f) => ["money", "minutes", "status", "policy", "percent", "time"].includes(f.kind))
+      .slice(0, 30)
+      .map((f) => `${factToken(f.id, f.display)} (${f.label})`);
     input.push({
       role: "user",
       content:
         "[FairShift system check — not from the worker] Your answer was rejected because " +
         v.violations.slice(0, 5).join("; ") +
-        ". Rewrite it using ONLY [[fN]] placeholders from this turn's tool results for every amount, time, duration, percentage, status or id. Call tools again if you need facts.",
+        ". Reply again with the JSON object only. Every amount, time, duration, percentage, status or id must be one of these tokens, copied exactly:\n" +
+        (available.length ? available.join("\n") : "(no facts yet — call a tool first)"),
     });
   }
 
@@ -194,5 +242,6 @@ export async function runAssistant(args: {
     fallback: true,
     usage,
     violations: lastViolations,
+    attempts,
   };
 }

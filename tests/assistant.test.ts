@@ -3,10 +3,10 @@
  * driven by a scripted fake model. No external OpenAI calls.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { FactLedger } from "@/lib/assistant/facts";
+import { FactLedger, toModelPayload } from "@/lib/assistant/facts";
 import { executeTool, TOOLS, type ToolContext } from "@/lib/assistant/tools";
-import { runAssistant, type ModelClient, type ModelResponse } from "@/lib/assistant/run";
-import { validateAnswer } from "@/lib/assistant/validate";
+import { runAssistant, sanitiseDiagnostic, type ModelClient, type ModelResponse } from "@/lib/assistant/run";
+import { placeholderStats, validateAnswer } from "@/lib/assistant/validate";
 import type { Db } from "@/lib/db/connect";
 import * as s from "@/lib/db/schema";
 import { correctAssignmentTime, saveAllocation } from "@/lib/shifts/commands";
@@ -159,13 +159,14 @@ describe("malicious or irrelevant tool requests", () => {
   });
 });
 
+function ledgerWith() {
+  const l = new FactLedger();
+  const delta = l.add({ kind: "money", display: "−£111.69", label: "Change", source: { type: "comparison", id: "c", label: "x" }, value: -11169 });
+  const status = l.add({ kind: "status", display: "Provisional — calculated, not locked, not paid", label: "Status", source: { type: "shift", id: "s", label: "x" }, value: "provisional" });
+  return { l, delta: delta.fact, status: status.fact };
+}
+
 describe("answer validation (numeric guardrails)", () => {
-  function ledgerWith() {
-    const l = new FactLedger();
-    const delta = l.add({ kind: "money", display: "−£111.69", label: "Change", source: { type: "comparison", id: "c", label: "x" }, value: -11169 });
-    const status = l.add({ kind: "status", display: "Provisional — calculated, not locked, not paid", label: "Status", source: { type: "shift", id: "s", label: "x" }, value: "provisional" });
-    return { l, delta: delta.fact, status: status.fact };
-  }
 
   it("accepts placeholders and renders trusted values as fact segments", () => {
     const { l, delta } = ledgerWith();
@@ -234,10 +235,11 @@ describe("assistant loop", () => {
     const { client, calls } = fakeModel((input, turn) => {
       if (turn === 1) return { output: [fnCall("compare_periods", { earlier_shift_id: null, later_shift_id: null })] };
       const out = toolOutput(input, "call_compare_periods");
-      const steps = out.steps as Array<{ effect: F }>;
+      // The model sees self-verifying tokens like [[f3|−£111.69]] and copies them verbatim.
+      const steps = out.steps as Array<{ effect: string }>;
       return final(
-        `You earned [[${(out.difference_in_your_share as F).fact}]] less. The pool was smaller ([[${steps[0].effect.fact}]]), ` +
-          `you worked fewer hours ([[${steps[1].effect.fact}]]) and the team had more points ([[${steps[2].effect.fact}]]). These figures are provisional.`,
+        `You earned ${out.difference_in_your_share} less. The pool was smaller (${steps[0].effect}), ` +
+          `you worked fewer hours (${steps[1].effect}) and the team had more points (${steps[2].effect}). These figures are provisional.`,
       );
     });
     const r = await run(client, "Why did I earn less this Friday than last Friday?");
@@ -274,7 +276,7 @@ describe("assistant loop", () => {
           ],
         };
       const out = toolOutput(input, "call_create_pay_query");
-      return final(`I've prepared a pay query: recorded [[${(out.recorded as F).fact}]], your claim [[${(out.claimed as F).fact}]]. Click Create draft to save it.`, true);
+      return final(`I've prepared a pay query: recorded ${out.recorded}, your claim ${out.claimed}. Click Create draft to save it.`, true);
     });
     const r = await run(client, "But I actually worked an extra hour!");
     expect(r.verified).toBe(true);
@@ -326,5 +328,113 @@ describe("assistant loop", () => {
     const ctx = ctxFor("w_priya");
     const out = (await call(ctx, "get_worker_shifts")).output as { shifts: Array<{ shift_id: string; your_share: F }> };
     expect(display(ctx, out.shifts.find((x) => x.shift_id === "sh_2026-10-23_dinner")!.your_share)).toBe("£182.58");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: the first real Gemini ai-smoke run fell back because the model
+// re-typed values that tool results showed as {fact, display}. Tool results now
+// reach the model as self-verifying [[fN|value]] tokens; validation is unchanged
+// in strictness: values outside tokens are still rejected, and an edited token is too.
+
+describe("self-verifying fact tokens ([[fN|value]])", () => {
+  it("a model copying tokens verbatim is verified and rendered from the ledger", () => {
+    const { l, delta } = ledgerWith();
+    const v = validateAnswer(`You earned [[${delta}|−£111.69]] less.`, l);
+    expect(v.ok).toBe(true);
+    if (v.ok) expect(v.segments.find((x) => x.type === "fact")).toMatchObject({ display: "−£111.69" });
+  });
+
+  it("an altered token value is rejected (the model cannot change a verified figure)", () => {
+    const { l, delta } = ledgerWith();
+    for (const wrong of ["−£111.70", "£111.69", "−£11.69", "-£1,111.69"]) {
+      const v = validateAnswer(`You earned [[${delta}|${wrong}]] less.`, l);
+      expect(v.ok, wrong).toBe(false);
+      if (!v.ok) expect(v.violations.join(" ")).toMatch(/changes the verified value/);
+    }
+    expect(placeholderStats(`[[${delta}|−£1.00]] and [[f999|x]] and [[${delta}]]`, l)).toEqual({ total: 3, unknown: 1, altered: 1 });
+  });
+
+  it("an ASCII hyphen instead of the minus sign is tolerated (same value)", () => {
+    const { l, delta } = ledgerWith();
+    expect(validateAnswer(`You earned [[${delta}|-£111.69]] less.`, l).ok).toBe(true);
+  });
+
+  it("raw values written outside tokens are still rejected", () => {
+    const { l, delta } = ledgerWith();
+    expect(validateAnswer(`You earned [[${delta}|−£111.69]] less, about £112 in total.`, l).ok).toBe(false);
+    expect(validateAnswer(`You earned [[${delta}|−£111.69]] less over 6 hours.`, l).ok).toBe(false);
+    expect(validateAnswer(`You earned [[${delta}|−£111.69]] less — 18% down.`, l).ok).toBe(false);
+  });
+
+  it("toModelPayload turns every {fact, display} into one token and leaves other data alone", () => {
+    expect(toModelPayload({ a: { fact: "f1", display: "£5.00" }, b: [{ effect: { fact: "f2", display: "−1h" } }], c: "x", d: 3, e: { fact: "f3", display: "y", more: 1 } })).toEqual({
+      a: "[[f1|£5.00]]",
+      b: [{ effect: "[[f2|−1h]]" }],
+      c: "x",
+      d: 3,
+      e: { fact: "f3", display: "y", more: 1 },
+    });
+  });
+
+  it("compare_periods sends a compact payload (no rota or clock times) and every value is a token", async () => {
+    await fixSam();
+    const ctx = ctxFor();
+    const r = await call(ctx, "compare_periods", { earlier_shift_id: null, later_shift_id: null });
+    const model = JSON.stringify(toModelPayload(r.output));
+    expect(model).not.toMatch(/rota_start|clock_in|clock_out|shift_id/);
+    expect(model).toContain("|−£111.69]]");
+    expect(model).toContain("|−£54.13]]");
+    expect(model).toContain("|£154.77]]");
+    expect(model).toContain("|£266.46]]");
+    expect(model).not.toMatch(/"fact":/);
+    expect(model.length).toBeLessThan(3500);
+  });
+});
+
+describe("assistant loop: Gemini-like behaviour and diagnostics", () => {
+  const run = (client: ModelClient, message: string) => runAssistant({ db, workerId: "w_sam", workerFirstName: "Sam", history: [], message, client, model: "fake" });
+
+  it("Sam's question is answered in 2 model calls when the model copies tokens", async () => {
+    await fixSam();
+    const { client, calls } = fakeModel((input, turn) => {
+      if (turn === 1) return { output: [fnCall("compare_periods", { earlier_shift_id: null, later_shift_id: null })] };
+      const out = toolOutput(input, "call_compare_periods");
+      const steps = out.steps as Array<{ effect: string }>;
+      return { ...final(`You earned ${out.difference_in_your_share} less: pool ${steps[0].effect}, your points ${steps[1].effect}, team ${steps[2].effect}.`), finish_reason: "stop" };
+    });
+    const r = await run(client, "Why did I earn less this Friday than last Friday?");
+    expect(r.verified).toBe(true);
+    expect(calls).toHaveLength(2);
+    expect(r.attempts).toEqual([{ finishReason: "stop", textChars: expect.any(Number), jsonValid: true, shapeValid: true, placeholders: { total: 4, unknown: 0, altered: 0 }, violations: [] }]);
+  });
+
+  it("re-typed raw values are rejected; the retry lists the exact tokens; diagnostics explain why", async () => {
+    await fixSam();
+    let retryPrompt = "";
+    const { client, calls } = fakeModel((input, turn) => {
+      if (turn === 1) return { output: [fnCall("compare_periods", { earlier_shift_id: null, later_shift_id: null })] };
+      if (turn === 3) retryPrompt = String((input.at(-1) as { content: string }).content);
+      return final("You earned £111.69 less because the pool fell by £130.");
+    });
+    const r = await run(client, "Why did I earn less?");
+    expect(r.fallback).toBe(true);
+    expect(calls).toHaveLength(3);
+    expect(retryPrompt).toContain("|−£111.69]]");
+    expect(r.attempts).toHaveLength(2);
+    expect(r.attempts[0]).toMatchObject({ jsonValid: true, shapeValid: true, placeholders: { total: 0, unknown: 0, altered: 0 } });
+    expect(r.attempts[0].violations.join(" ")).toMatch(/currency amount written directly/);
+    expect(JSON.stringify(r.segments)).not.toContain("£130");
+  });
+
+  it("a truncated reply (finish_reason=length) is recorded and never shown", async () => {
+    const { client } = fakeModel(() => ({ output: [{ type: "message", content: [{ type: "output_text", text: '{"answer":"You earned [[f1' }] }], finish_reason: "length" }));
+    const r = await run(client, "Why did I earn less?");
+    expect(r.fallback).toBe(true);
+    expect(r.attempts[0]).toMatchObject({ finishReason: "length", jsonValid: false, shapeValid: false });
+  });
+
+  it("diagnostics mask id-like strings", () => {
+    expect(sanitiseDiagnostic('it contains an ID written directly ("BATCH9X7K2QW1")')).toBe('it contains an ID written directly ("[id]")');
   });
 });

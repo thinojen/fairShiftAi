@@ -65,7 +65,9 @@ Legend: ✅ done & verified · 🟡 built, needs external credentials to verify 
 - ✅ Free-tier limits: 5/min global, 100/day; friendly quota/auth errors; no automatic retries
 - ✅ 18 new tests (168 total) incl. a full interaction over HTTP against a Gemini-like server that enforces thought signatures
 - ✅ Local rehearsals: ai-smoke + ai-check pass against a Gemini-format mock; quota → INCONCLUSIVE; app route → friendly 429; 5/min cap
-- 🟡 **Add `GEMINI_API_KEY` secret → run `ai-smoke`** (proves real function calling + thought signatures)
+- ✅ **Verified by user:** real `ai-smoke` reached Gemini — auth, tool call, tool execution and thought signatures OK; verified-answer check FAILED (fallback shown, 6 calls / ~22.8k input tokens)
+- ✅ Fix: self-verifying `[[fN|value]]` tokens, compact `compare_periods`, compare-only prompt, token list in retry, 4,096 token floor, per-attempt diagnostics (SPEC 32–34) + regression tests
+- 🟡 **Re-run `ai-smoke`** — Gemini is NOT verified until this passes
 - 🟡 **Run `ai-check`** (7 real scenarios)
 - 🟡 **Render: add `GEMINI_API_KEY`, `AI_PROVIDER=gemini`, `GEMINI_MODEL`, `AI_DAILY_LIMIT=100`; remove OpenAI vars**
 

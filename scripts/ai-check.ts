@@ -80,8 +80,30 @@ async function ask(db: Db, message: string, history: ChatTurn[] = [], workerId =
   return r;
 }
 
+/** Sanitised diagnostics: tool names, shape/placeholder checks and rejection reasons. No keys, no emails, ids masked. */
+function printDiagnostics(r: AssistantResult) {
+  const names = r.toolCalls.map((c) => `${c.name}${c.ok ? "" : " (failed)"}`);
+  console.log("  diagnostics:");
+  console.log(`    model calls: ${r.usage.modelCalls} · tokens in/out: ${r.usage.inputTokens}/${r.usage.outputTokens}`);
+  console.log(`    tools called: ${names.join(", ") || "none"} · compare_periods called: ${r.toolCalls.some((c) => c.name === "compare_periods")}`);
+  if (!r.attempts.length) console.log("    no final answer was produced (tool-round limit reached)");
+  r.attempts.forEach((a, i) => {
+    console.log(
+      `    answer attempt ${i + 1}: finish_reason=${a.finishReason ?? "n/a"} · chars=${a.textChars} · valid JSON=${a.jsonValid} · required fields=${a.shapeValid} · ` +
+        `placeholders total=${a.placeholders.total} unknown=${a.placeholders.unknown} altered=${a.placeholders.altered}`,
+    );
+    for (const v of a.violations) console.log(`      rejected: ${v}`);
+  });
+  const unverifiedClaims = r.attempts.some((a) => a.violations.some((v) => /written directly|no PayPal payout has succeeded/.test(v)));
+  console.log(`    unverified financial claims caused rejection: ${unverifiedClaims}`);
+}
+
 function record(scenario: string, r: AssistantResult, checks: Check[]) {
   results.push({ scenario, checks, answer: render(r) });
+  if (!flags.smoke && checks.some((c) => c.hard && !c.pass)) {
+    console.log(`• ${scenario}`);
+    printDiagnostics(r);
+  }
 }
 
 async function smoke(db: Db) {
@@ -95,6 +117,7 @@ async function smoke(db: Db) {
   const sigBack = ((sentBack?.tool_calls as Array<{ extra_content?: { google?: { thought_signature?: string } } }> | undefined)?.[0])?.extra_content?.google?.thought_signature;
   const checks: Check[] = [
     { name: "1-2. model requested an approved tool", pass: r.toolCalls.length > 0 && r.toolCalls.every((c) => c.ok), hard: true, detail: r.toolCalls.map((c) => c.name).join(", ") },
+    { name: "compare_periods used for the comparison", pass: r.toolCalls.some((c) => c.name === "compare_periods"), hard: false },
     { name: "3-4. tool executed and returned verified data", pass: r.toolCalls.some((c) => c.ok), hard: true },
     {
       name: sig ? "thought signature returned by Gemini and replayed unchanged" : "thought signature (Gemini did not return one for this call)",
@@ -106,6 +129,7 @@ async function smoke(db: Db) {
   ];
   record("SMOKE: one complete interaction", r, checks);
   console.log(`  raw turns: ${traffic.length} · response_format sent first: ${"response_format" in (traffic[0]?.req ?? {})} · thought signature seen: ${Boolean(sig)}`);
+  printDiagnostics(r);
 }
 
 async function main() {

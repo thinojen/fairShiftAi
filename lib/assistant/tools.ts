@@ -115,6 +115,26 @@ function shiftSummary(ctx: ToolContext, sh: WorkerShift) {
   };
 }
 
+/** Compact per-shift view for compare_periods: only what a comparison explanation needs. */
+function comparisonSide(ctx: ToolContext, sh: WorkerShift) {
+  const src = shiftSource(sh);
+  return {
+    date: ctx.ledger.add({ kind: "date", display: formatShiftDate(sh.date), label: "Shift date", source: src, value: sh.date }),
+    service: sh.service,
+    status: stateFact(ctx, sh),
+    policy_version: sh.policy
+      ? ctx.ledger.add({ kind: "policy", display: `v${sh.policy.version}`, label: "Tipping policy", source: { type: "policy", id: sh.policy.id, label: `Policy v${sh.policy.version}` }, value: sh.policy.version })
+      : "none",
+    tip_pool: money(ctx, sh.grossPence, "Tip pool", { type: "tip_pool", id: sh.shiftId, label: `Tip pool, ${shiftLabel(sh)}` }),
+    hours_worked:
+      sh.workedMinutes === null
+        ? "unknown (incomplete record)"
+        : ctx.ledger.add({ kind: "minutes", display: formatMinutes(sh.workedMinutes), label: "Hours worked", source: src, value: sh.workedMinutes }),
+    hours_were_corrected_by_manager: sh.hoursCorrected,
+    your_share: shareFact(ctx, sh) ?? "not calculated",
+  };
+}
+
 // ---------------------------------------------------------------------------
 
 export const TOOLS: ToolDef[] = [
@@ -238,7 +258,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "compare_periods",
     description:
-      "Precomputed comparison of the worker's share between two shifts. With both ids null it compares the latest shift with the same service a week earlier (e.g. this Friday vs last Friday). All differences are computed by the engine.",
+      "Precomputed comparison of the worker's share between two shifts, with the full breakdown (both shifts' pool, hours, policy, share, and step-by-step effects). With both ids null it compares the latest shift with the same service a week earlier (e.g. this Friday vs last Friday). For any 'why did I earn less/more' question call ONLY this tool — no other tool is needed.",
     parameters: obj({
       earlier_shift_id: nullableString("Earlier shift_id, or null for automatic week-on-week"),
       later_shift_id: nullableString("Later shift_id, or null for automatic week-on-week"),
@@ -253,7 +273,7 @@ export const TOOLS: ToolDef[] = [
       if (!pair) return { comparable: false, reason: "There is no matching earlier shift to compare with." };
       const c = compareWorkerShifts(pair.earlier, pair.later);
       const src: FactSource = { type: "comparison", id: `${pair.earlier.shiftId}..${pair.later.shiftId}`, label: `${shiftLabel(pair.earlier)} vs ${shiftLabel(pair.later)}` };
-      const side = (sh: WorkerShift) => shiftSummary(ctx, sh);
+      const side = (sh: WorkerShift) => comparisonSide(ctx, sh);
       if (!c.comparable) {
         return { comparable: false, reason: c.reason, earlier: side(pair.earlier), later: side(pair.later), note: "Do not state a difference or an amount for an incomplete shift." };
       }
