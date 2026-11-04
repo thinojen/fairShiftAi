@@ -75,7 +75,11 @@ Legend: ✅ done & verified · 🟡 built, needs external credentials to verify 
 - ✅ Verified by user: full `ai-check` hit HTTP 503 "high demand" after 3 good responses (provider capacity)
 - ✅ Bounded 503 retries, busy message, /api/health AI settings, per-scenario ai-check outcomes (SPEC 39–42) + regression tests
 - ✅ Local end-to-end Sam journey on a production build with real PostgreSQL and a Gemini-format MOCK (first request 503 → retried): correction → question → −£111.69 → extra hour → draft → sent → manager inbox with evidence. Not a live test.
-- 🟡 **Render:** set `GEMINI_MODEL=gemini-3.5-flash-lite`, check `/api/health`, try Sam's questions on the live site
+- ✅ **Verified by user:** Render `/api/health` shows Gemini enabled with `gemini-3.5-flash-lite`
+- ✅ **Verified by user:** live `/worker` crashes — Postgres 42703 `pay_queries.shift_assignment_id` missing (migration 0004 not applied to Supabase)
+- ✅ `db-status` (read-only) + hardened `db-migrate` + regression tests (SPEC 43–45); fix rehearsed on real PostgreSQL from 0003 and 0001 states, all rows preserved
+- 🟡 **Run `db-status` → `db-migrate` → `db-status`**, then reload https://fairshift-ai.onrender.com/worker (not yet verified live)
+- 🟡 Try Sam's questions on the live site
 - 🟡 Full `ai-check` again (or the unfinished scenarios only)
 - 🟡 Render: set `GEMINI_MODEL=gemini-3.5-flash-lite` in the dashboard (existing services keep their old value)
 - 🟡 **Run `ai-check`** (7 real scenarios)

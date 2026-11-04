@@ -128,7 +128,8 @@ The app itself (e.g. on Render) also needs `PAYOUT_MAX_ITEM_PENCE=30000`, and �
 Repo → **Actions → Integration (manual) → Run workflow**, choose a task:
 - `paypal-check` — read-only check of auth, Payouts permission and API access. **Moves no money.**
 - `paypal-test-payout` — sends one £1.00 **sandbox** payout. Does nothing unless **confirm_payout** is ticked. To retry safely, paste the `sender_batch_id` from the previous run's log into **batch_id**.
-- `db-migrate` — applies the database schema. Run it after pulling a new migration (Milestone 2 adds `0001_milestone2.sql`).
+- `db-status` — **read-only**: shows which database it is connected to (host and user, never the password), which migrations are applied or pending, any columns the app needs that are missing, and row counts. Changes nothing.
+- `db-migrate` — applies **pending** migrations in one transaction (all or nothing). It lists what is pending first, refuses if existing rows would block a migration, never drops tables or deletes rows, and re-checks the schema afterwards. Run it after every release that adds a file to `/drizzle`, **before** the new app version serves traffic.
 - `db-seed` — loads synthetic demo data (no PayPal calls). Refuses once payment history or pay queries exist.
 - `ai-ping` — **one text-only Gemini request** (no tools, no database, no PayPal). Confirms the key, model and endpoint work; on failure prints a sanitised category, HTTP status, Google error code and timeout flag.
 - `ai-smoke` — **one real Gemini interaction**: question → Gemini calls a tool → our tool runs → verified answer, and checks Gemini's thought signature is sent back unchanged. Run this first.
@@ -155,6 +156,7 @@ npm run paypal:test-payout -- --confirm
 | `npm run db:migrate` · `npm run db:seed` | Apply schema · load demo data |
 | `npm run paypal:check` | Read-only PayPal feasibility check |
 | `npm run paypal:test-payout -- --confirm [--batch-id ID]` | One £1.00 sandbox payout |
+| `npm run db:status` | Read-only schema/migration check of `DATABASE_URL` |
 | `npm run ai:ping` | One text-only Gemini request (connectivity / key / model) |
 | `npm run ai:check [-- --smoke]` | Real Gemini assistant test on an in-memory database |
 

@@ -11,6 +11,7 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/db-migrate.ts",
+    "db:status": "tsx scripts/db-status.ts",
     "db:seed": "tsx scripts/db-seed.ts",
     "paypal:check": "tsx scripts/paypal-check.ts",
     "paypal:test-payout": "tsx scripts/paypal-test-payout.ts",
