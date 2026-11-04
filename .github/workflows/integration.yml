@@ -8,6 +8,7 @@ name: Integration (manual)
 #   paypal-test-payout  sends ONE £1.00 SANDBOX payout — only if "confirm_payout" is ticked.
 #   db-migrate          applies generated SQL migrations to Supabase.
 #   db-seed             wipes + reseeds synthetic demo data. Never touches PayPal.
+#   ai-ping             ONE text-only Gemini request (connectivity, key, model). No tools, DB or PayPal.
 #   ai-smoke            ONE real Gemini interaction (tool call + thought signature + grounded answer).
 #                       Run this first. In-memory database; never touches Supabase or PayPal.
 #   ai-check            The full real-Gemini test: 7 scenarios, paced for the free tier (~3 min).
@@ -18,7 +19,7 @@ on:
       task:
         description: What to run
         type: choice
-        options: [paypal-check, paypal-test-payout, db-migrate, db-seed, ai-smoke, ai-check]
+        options: [paypal-check, paypal-test-payout, db-migrate, db-seed, ai-ping, ai-smoke, ai-check]
         default: paypal-check
       confirm_payout:
         description: "paypal-test-payout only — tick to really send £1.00 in the PayPal SANDBOX"
@@ -85,6 +86,15 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           PAYPAL_SANDBOX_RECIPIENTS: ${{ secrets.PAYPAL_SANDBOX_RECIPIENTS }}
         run: npm run db:seed
+
+      - name: AI ping (real Gemini, one text-only request; no tools, no DB, no PayPal)
+        if: inputs.task == 'ai-ping'
+        timeout-minutes: 2
+        env:
+          AI_PROVIDER: gemini
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.1-flash-lite' }}
+        run: npm run ai:ping
 
       - name: AI smoke test (real Gemini, one interaction, in-memory DB)
         if: inputs.task == 'ai-smoke'

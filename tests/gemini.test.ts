@@ -8,7 +8,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { UsageLimiter, LIMITS, dailyLimitFromEnv, aiAvailability } from "@/lib/assistant/limits";
-import { AiProviderError, classifyProviderError } from "@/lib/assistant/providers/errors";
+import { AiProviderError, classifyProviderError, describeProviderError, sanitiseProviderText } from "@/lib/assistant/providers/errors";
 import { extractJsonText, fromChatResponse, geminiModelClient, isResponseFormatRejection, toChatRequest, toGeminiSchema } from "@/lib/assistant/providers/gemini";
 import { createModelClient, providerConfig } from "@/lib/assistant/providers";
 import { parseAnswerShape, runAssistant } from "@/lib/assistant/run";
@@ -21,7 +21,7 @@ import { createTestDb } from "./helpers/pglite";
 // ---------------------------------------------------------------------------
 // A local Gemini-compatible server.
 type Req = { body: Record<string, unknown> };
-type Handler = (req: Req, n: number) => { status: number; json: unknown };
+type Handler = (req: Req, n: number) => { status: number; json: unknown; delayMs?: number };
 let server: http.Server;
 let baseURL = "";
 let handler: Handler = () => ({ status: 500, json: {} });
@@ -35,8 +35,11 @@ beforeAll(async () => {
       const body = JSON.parse(raw || "{}");
       seen.push(body);
       const r = handler({ body }, seen.length);
-      res.writeHead(r.status, { "content-type": "application/json" });
-      res.end(JSON.stringify(r.json));
+      setTimeout(() => {
+        if (res.destroyed) return;
+        res.writeHead(r.status, { "content-type": "application/json" });
+        res.end(JSON.stringify(r.json));
+      }, r.delayMs ?? 0);
     });
   });
   await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
@@ -240,7 +243,7 @@ describe("quota, credentials and limits", () => {
   it("classifies errors", () => {
     expect(classifyProviderError({ status: 429 }).kind).toBe("quota");
     expect(classifyProviderError({ status: 403 }).kind).toBe("auth");
-    expect(classifyProviderError(new Error("fetch failed")).kind).toBe("unavailable");
+    expect(classifyProviderError(new Error("fetch failed")).kind).toBe("network");
     expect(classifyProviderError(new AiProviderError("x", "quota")).kind).toBe("quota");
   });
 
@@ -316,5 +319,139 @@ describe("schema dialect + request mapping (pure)", () => {
     expect(isResponseFormatRejection({ status: 400, message: "response_mime_type is not supported with tools" })).toBe(true);
     expect(isResponseFormatRejection({ status: 400, message: "Request contains an invalid argument." })).toBe(false);
     expect(isResponseFormatRejection({ status: 429, message: "response_format" })).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Error diagnostics: the first real ai-smoke crash only said "AI service
+// unavailable". Every failure must now say what happened, safely.
+
+describe("provider error diagnostics (sanitised)", () => {
+  const gErr = (status: number, gStatus: string, message: string) => [{ error: { code: status, status: gStatus, message } }];
+  const failWith = async (p: Promise<unknown>) => {
+    try {
+      await p;
+    } catch (e) {
+      return e as AiProviderError;
+    }
+    throw new Error("expected a failure");
+  };
+  const noSecrets = (lines: string[]) => {
+    const text = lines.join("\n");
+    expect(text).not.toContain("test-key");
+    expect(text).not.toMatch(/authorization|bearer [^[]/i);
+    expect(text).not.toContain("messages\":"); // no request bodies
+  };
+
+  it("HTTP 404 NOT_FOUND (unknown model) → model unavailable, at the initial request, 0 completed", async () => {
+    handler = () => ({ status: 404, json: gErr(404, "NOT_FOUND", "models/gemini-9-imaginary is not found for API version v1beta, or is not supported for generateContent.") });
+    const e = await failWith(ask("hi"));
+    expect(e).toMatchObject({ name: "AiProviderError", kind: "model_unavailable", status: 404 });
+    expect(e.details).toMatchObject({ providerCode: "NOT_FOUND", timedOut: false, requestsCompleted: 0, stage: expect.stringMatching(/^initial request/) });
+    expect(e.details.providerMessage).toMatch(/is not found for API version v1beta/);
+    expect(e.details.request).toMatch(/model=gemini-3.1-flash-lite, messages=2, tools=7, response_format=json_schema/);
+    const lines = describeProviderError(e);
+    expect(lines[0]).toBe("category: model unavailable (HTTP 404)");
+    noSecrets(lines);
+    expect(seen).toHaveLength(1);
+  });
+
+  it("HTTP 429 → quota with Google's code, one request only", async () => {
+    handler = () => ({ status: 429, json: gErr(429, "RESOURCE_EXHAUSTED", "Quota exceeded for metric: generate_content_free_tier_requests") });
+    const e = await failWith(ask("hi"));
+    expect(e).toMatchObject({ kind: "quota", status: 429 });
+    expect(e.details.providerCode).toBe("RESOURCE_EXHAUSTED");
+    expect(seen).toHaveLength(1);
+  });
+
+  it("HTTP 500 INTERNAL → server error", async () => {
+    handler = () => ({ status: 500, json: gErr(500, "INTERNAL", "An internal error has occurred.") });
+    const e = await failWith(ask("hi"));
+    expect(e).toMatchObject({ kind: "server", status: 500 });
+    expect(e.details.providerCode).toBe("INTERNAL");
+    expect(describeProviderError(e)[0]).toBe("category: server error (HTTP 500)");
+  });
+
+  it("HTTP 503 UNAVAILABLE after a tool round → server error, stage and completed count recorded", async () => {
+    await fixSam();
+    handler = (_r, n) =>
+      n === 1 ? { status: 200, json: chat(toolCallMsg("compare_periods", { earlier_shift_id: null, later_shift_id: null })) } : { status: 503, json: gErr(503, "UNAVAILABLE", "The model is overloaded. Please try again later.") };
+    const e = await failWith(ask("Why did I earn less this Friday than last Friday?"));
+    expect(e).toMatchObject({ kind: "server", status: 503 });
+    expect(e.details).toMatchObject({ providerCode: "UNAVAILABLE", requestsCompleted: 1, stage: expect.stringMatching(/^follow-up after tool results/) });
+    expect(seen).toHaveLength(2); // no automatic retry
+  });
+
+  it("connection timeout → network failure, timed out = yes, no HTTP status", async () => {
+    handler = () => ({ status: 200, json: chat({ role: "assistant", content: answerJson("late") }), delayMs: 1500 });
+    const client = createModelClient({ ok: true, provider: "gemini", apiKey: "test-key", model: "gemini-3.1-flash-lite" }, { baseURL, timeoutMs: 200 });
+    const e = await failWith(runAssistant({ db, workerId: "w_sam", workerFirstName: "Sam", history: [], message: "hi", client, model: "gemini-3.1-flash-lite" }));
+    expect(e).toMatchObject({ kind: "network", status: undefined });
+    expect(e.details.timedOut).toBe(true);
+    expect(describeProviderError(e)).toContain("timed out: yes");
+  });
+
+  it("connection refused → network failure with the socket code", async () => {
+    const client = createModelClient({ ok: true, provider: "gemini", apiKey: "test-key", model: "gemini-3.1-flash-lite" }, { baseURL: "http://127.0.0.1:59999/v1beta/openai/" });
+    const e = await failWith(runAssistant({ db, workerId: "w_sam", workerFirstName: "Sam", history: [], message: "hi", client, model: "gemini-3.1-flash-lite" }));
+    expect(e).toMatchObject({ kind: "network" });
+    expect(e.details).toMatchObject({ providerCode: "ECONNREFUSED", timedOut: false, requestsCompleted: 0 });
+  });
+
+  it("authentication failures: 401, 403 and Google's 400 'API key not valid' → authentication", async () => {
+    for (const [status, code, msg] of [
+      [401, "UNAUTHENTICATED", "Request had invalid authentication credentials."],
+      [403, "PERMISSION_DENIED", "Generative Language API has not been used in this project."],
+      [400, "INVALID_ARGUMENT", "API key not valid. Please pass a valid API key."],
+    ] as const) {
+      handler = () => ({ status, json: gErr(status, code, msg) });
+      const e = await failWith(ask("hi"));
+      expect(e.kind, String(status)).toBe("auth");
+      expect(describeProviderError(e)[0]).toBe(`category: authentication (HTTP ${status})`);
+      noSecrets(describeProviderError(e));
+    }
+  });
+
+  it("invalid model configuration is caught locally without echoing the value; a bad name from the API is 'model unavailable'", async () => {
+    for (const bad of ["gpt-4o", "Gemini 3.1 Flash Lite", "AIzaSyD-not-a-model-but-a-key-pasted-here", "gemini-3.1-flash-lite\nx", "gemini-"]) {
+      const c = providerConfig({ AI_PROVIDER: "gemini", GEMINI_API_KEY: "k", GEMINI_MODEL: bad });
+      expect(c, bad).toMatchObject({ ok: false, reason: expect.stringMatching(/GEMINI_MODEL is not a valid Gemini model id/) });
+      if (!c.ok && bad !== "gemini-") expect(c.reason).not.toContain(bad); // ("gemini-" is a prefix of the example)
+    }
+    expect(providerConfig({ AI_PROVIDER: "gemini", GEMINI_API_KEY: "k", GEMINI_MODEL: "models/gemini-3.1-flash-lite" })).toMatchObject({ ok: true, model: "gemini-3.1-flash-lite" });
+    handler = () => ({ status: 400, json: gErr(400, "INVALID_ARGUMENT", "* GenerateContentRequest.model: unexpected model name format") });
+    expect((await failWith(ask("hi"))).kind).toBe("model_unavailable");
+  });
+
+  it("an empty response is a server error at the 'reading the response' stage; our own bugs are 'internal', not 'unavailable'", async () => {
+    handler = () => ({ status: 200, json: { id: "x", object: "chat.completion", choices: [] } });
+    const e = await failWith(ask("hi"));
+    expect(e).toMatchObject({ kind: "server" });
+    expect(e.details).toMatchObject({ providerCode: "EMPTY_RESPONSE", requestsCompleted: 1, stage: expect.stringMatching(/reading Gemini's response$/) });
+
+    const buggy = geminiModelClient(async () => {
+      throw new TypeError("Cannot read properties of undefined (reading 'map')");
+    }, "gemini-3.1-flash-lite");
+    const e2 = await failWith(buggy.create({ input: [{ role: "user", content: "hi" }] }));
+    expect(e2.kind).toBe("internal");
+    expect(e2.details.providerCode).toBe("TypeError");
+  });
+
+  it("provider messages are sanitised: keys, tokens and emails redacted, length capped", () => {
+    const t = sanitiseProviderText("bad key AIzaSyA1234567890abcdefghijklmnopqrstu for sam@example.com with Bearer ya29.abcdefghijkl ?key=secret123 " + "x".repeat(400));
+    expect(t).not.toMatch(/AIzaSy|sam@example|ya29|secret123/);
+    expect(t.length).toBeLessThanOrEqual(160);
+    const e = classifyProviderError({ status: 500, error: [{ error: { status: "INTERNAL", message: "boom for AIzaSyA1234567890abcdefghijklmnopqrstu" } }] });
+    expect(e.details.providerMessage).toBe("boom for [key]");
+  });
+
+  it("the structured-output fallback still triggers only on an explicit rejection", async () => {
+    handler = (r) =>
+      "response_format" in r.body
+        ? { status: 400, json: gErr(400, "INVALID_ARGUMENT", "Function calling with a response mime type: 'application/json' is unsupported") }
+        : { status: 200, json: chat({ role: "assistant", content: answerJson("I can only help with your own tips.") }) };
+    const r = await ask("hi");
+    expect(r.verified).toBe(true);
+    expect(seen).toHaveLength(2);
   });
 });

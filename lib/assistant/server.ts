@@ -2,4 +2,4 @@
 import "server-only";
 
 export { createModelClient, providerConfig } from "./providers";
-export { AiProviderError } from "./providers/errors";
+export { AiProviderError, describeProviderError } from "./providers/errors";

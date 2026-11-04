@@ -124,7 +124,7 @@ let callCounter = 0;
 export function fromChatResponse(resp: ChatResponse, wantJson: boolean): ModelResponse {
   const msg = resp.choices?.[0]?.message;
   const finish_reason = resp.choices?.[0]?.finish_reason ?? null;
-  if (!msg) throw new AiProviderError("AI returned no message", "unavailable");
+  if (!msg) throw new AiProviderError("AI returned no message", "server", undefined, { providerCode: "EMPTY_RESPONSE", providerMessage: `no choices[0].message (finish_reason=${String(finish_reason)})` });
   const usage = { input_tokens: resp.usage?.prompt_tokens ?? 0, output_tokens: resp.usage?.completion_tokens ?? 0 };
 
   const toolCalls = msg.tool_calls ?? [];
@@ -166,26 +166,78 @@ export function isResponseFormatRejection(err: unknown): boolean {
 
 export type ChatTransport = (req: ChatRequest) => Promise<ChatResponse>;
 
+/** Which step of the interaction a request belongs to (for diagnostics only). */
+export function describeStage(params: JsonObject): string {
+  const input = (params.input as Array<JsonObject>) ?? [];
+  const lastUser = [...input].reverse().find((i) => i.role === "user");
+  if (typeof lastUser?.content === "string" && lastUser.content.startsWith("[FairShift system check")) return "corrective retry after a rejected answer";
+  const toolRounds = new Set(input.filter((i) => i.type === "function_call_output").map((i) => i.call_id)).size;
+  return toolRounds ? `follow-up after tool results (${toolRounds} tool result${toolRounds === 1 ? "" : "s"} so far)` : "initial request (question + tool definitions)";
+}
+
+/** Shape of a request, safe to log: no message content. */
+export function describeRequest(req: ChatRequest): string {
+  return [
+    `model=${req.model}`,
+    `messages=${req.messages.length}`,
+    `tools=${Array.isArray(req.tools) ? req.tools.length : 0}`,
+    `response_format=${req.response_format ? "json_schema" : "none"}`,
+    `reasoning_effort=${String(req.reasoning_effort ?? "default")}`,
+    `max_tokens=${String(req.max_tokens ?? "default")}`,
+  ].join(", ");
+}
+
 /** A ModelClient backed by Gemini's OpenAI-compatible Chat Completions endpoint. */
-export function geminiModelClient(transport: ChatTransport, model: string): ModelClient & { responseFormatDisabled: () => boolean } {
+export function geminiModelClient(transport: ChatTransport, model: string): ModelClient & { responseFormatDisabled: () => boolean; requestsCompleted: () => number } {
   let rejectsResponseFormat = false;
+  let completed = 0;
+  const formatRejections = new WeakSet<AiProviderError>();
+
+  /** Attach safe diagnostics (stage, request count, request shape) to a classified error. */
+  const fail = (err: unknown, stage: string, req?: ChatRequest) => {
+    const e = classifyProviderError(err);
+    e.details = { ...e.details, stage: e.details.stage ?? stage, requestsCompleted: e.details.requestsCompleted ?? completed, request: e.details.request ?? (req ? describeRequest(req) : undefined) };
+    return e;
+  };
+
   return {
     responseFormatDisabled: () => rejectsResponseFormat,
+    requestsCompleted: () => completed,
     async create(params) {
       const wantJson = Boolean((params.text as { format?: unknown } | undefined)?.format);
-      const send = async (withResponseFormat: boolean) => fromChatResponse(await transport(toChatRequest(params, { model, withResponseFormat })), wantJson);
-      try {
-        return await send(!rejectsResponseFormat);
-      } catch (err) {
-        if (!rejectsResponseFormat && isResponseFormatRejection(err)) {
-          rejectsResponseFormat = true; // remember for this process; JSON is still validated by the loop
-          try {
-            return await send(false);
-          } catch (err2) {
-            throw classifyProviderError(err2);
-          }
+      const stage = describeStage(params);
+      const send = async (withResponseFormat: boolean, label: string) => {
+        let req: ChatRequest;
+        try {
+          req = toChatRequest(params, { model, withResponseFormat });
+        } catch (err) {
+          throw fail(err, `${label}: building the request`);
         }
-        throw classifyProviderError(err);
+        let res: ChatResponse;
+        try {
+          res = await transport(req);
+        } catch (err) {
+          const e = fail(err, label, req);
+          // Decided on the RAW API error (full text), exactly as before.
+          if (isResponseFormatRejection(err)) formatRejections.add(e);
+          throw e;
+        }
+        completed++;
+        try {
+          return fromChatResponse(res, wantJson);
+        } catch (err) {
+          throw fail(err, `${label}: reading Gemini's response`, req);
+        }
+      };
+      try {
+        return await send(!rejectsResponseFormat, stage);
+      } catch (err) {
+        // Only an explicit rejection of structured output (an HTTP 400 from the API) triggers the one fallback.
+        if (!rejectsResponseFormat && formatRejections.has(err as AiProviderError)) {
+          rejectsResponseFormat = true; // remember for this process; JSON is still validated by the loop
+          return await send(false, `${stage} (retry without response_format)`);
+        }
+        throw err;
       }
     },
   };

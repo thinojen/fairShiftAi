@@ -14,7 +14,8 @@
     "db:seed": "tsx scripts/db-seed.ts",
     "paypal:check": "tsx scripts/paypal-check.ts",
     "paypal:test-payout": "tsx scripts/paypal-test-payout.ts",
-    "ai:check": "tsx scripts/ai-check.ts"
+    "ai:check": "tsx scripts/ai-check.ts",
+    "ai:ping": "tsx scripts/ai-ping.ts"
   },
   "dependencies": {
     "ag-grid-community": "^36.2.0",

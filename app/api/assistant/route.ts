@@ -8,7 +8,7 @@
  */
 import { headers } from "next/headers";
 import { assistantLimiter, LIMITS } from "@/lib/assistant/limits";
-import { AiProviderError, createModelClient, providerConfig } from "@/lib/assistant/server";
+import { AiProviderError, createModelClient, describeProviderError, providerConfig } from "@/lib/assistant/server";
 import { runAssistant, type ChatTurn } from "@/lib/assistant/run";
 import { getDb } from "@/lib/db/client";
 import { getDemoRole } from "@/lib/demo/role";
@@ -58,12 +58,13 @@ export async function POST(request: Request) {
       model: cfg.model,
     });
     if (result.fallback) console.warn("assistant fallback", { worker: role.workerId, violations: result.violations, tools: result.toolCalls });
-    const { violations: _v, usage: _u, ...safe } = result; // eslint-disable-line @typescript-eslint/no-unused-vars
+    // Diagnostics stay server-side.
+    const { violations: _v, usage: _u, attempts: _a, ...safe } = result; // eslint-disable-line @typescript-eslint/no-unused-vars
     return Response.json(safe);
   } catch (err) {
     // Honest failures only: never a partial or made-up answer.
     if (err instanceof AiProviderError) {
-      console.error("assistant provider error", err.kind, err.status ?? "", err.message.slice(0, 200));
+      console.error("assistant provider error | " + describeProviderError(err).join(" | "));
       if (err.kind === "quota") {
         return bad(429, "The free AI quota for this demo is used up for now. Please try again later — your figures on this page are unaffected.");
       }

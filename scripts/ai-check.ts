@@ -17,7 +17,7 @@ import { migrate } from "drizzle-orm/pglite/migrator";
 import OpenAI from "openai";
 import { parseArgs } from "node:util";
 import { createModelClient, providerConfig } from "../lib/assistant/providers";
-import { AiProviderError } from "../lib/assistant/providers/errors";
+import { AiProviderError, describeProviderError, KIND_LABEL } from "../lib/assistant/providers/errors";
 import { GEMINI_OPENAI_BASE_URL, geminiModelClient, type ChatRequest, type ChatResponse } from "../lib/assistant/providers/gemini";
 import type { ChatTurn, ModelClient, AssistantResult } from "../lib/assistant/run";
 import { runAssistant } from "../lib/assistant/run";
@@ -34,6 +34,9 @@ if (!cfg.ok) {
 const model = cfg.model;
 const { values: flags } = parseArgs({ options: { smoke: { type: "boolean", default: false } } });
 if (process.env.DATABASE_URL) console.log("• DATABASE_URL is ignored: this check only uses an in-memory database.");
+console.log(
+  `• provider: ${cfg.provider} · model: ${cfg.model} · endpoint: ${cfg.provider === "gemini" ? new URL(process.env.GEMINI_BASE_URL ?? GEMINI_OPENAI_BASE_URL).host + (process.env.GEMINI_BASE_URL ? " (OVERRIDDEN by GEMINI_BASE_URL)" : " (Chat Completions, OpenAI-compatible)") : "OpenAI"} · API key: set`,
+);
 
 /** Raw Gemini traffic, recorded for the smoke check. */
 const traffic: Array<{ req: ChatRequest; res: ChatResponse }> = [];
@@ -258,12 +261,22 @@ function report() {
   process.exit(hardFail ? 1 : 0);
 }
 
+/** Sanitised error report: category, HTTP status, provider code, timeout, stage, request count. */
+function printProviderError(e: unknown) {
+  console.error("\nAI provider error (sanitised):");
+  for (const line of describeProviderError(e)) console.error(`  ${line}`);
+  console.error(`  Gemini responses received in this run: ${traffic.length}`);
+}
+
 main().catch((e) => {
-  if (e instanceof AiProviderError && e.kind === "quota") inconclusive(e);
-  if (e instanceof AiProviderError && e.kind === "auth") {
+  const isProvider = e instanceof AiProviderError;
+  if (isProvider || cfg.ok) printProviderError(e);
+  if (isProvider && e.kind === "quota") inconclusive(e);
+  if (isProvider && e.kind === "auth") {
     console.error("\nRESULT: ✗ The API key was rejected. Check the GEMINI_API_KEY secret.");
     process.exit(1);
   }
-  console.error("\nRESULT: ✗ ai-check crashed:", e instanceof Error ? e.message : e);
+  const what = isProvider ? `${KIND_LABEL[e.kind]}${e.status !== undefined ? ` (HTTP ${e.status})` : ""}` : "unexpected error";
+  console.error(`\nRESULT: ✗ ai-check crashed: ${what}`);
   process.exit(1);
 });

@@ -116,7 +116,7 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 | `PAYPAL_SANDBOX_RECIPIENTS` | Comma-separated sandbox personal emails (Sam, Priya, Jordan, Alex, Casey) |
 | `DATABASE_URL` | Supabase **session pooler** URI (port 5432) |
 | `PAYPAL_WEBHOOK_ID` | *(later, after deploying)* |
-| `GEMINI_API_KEY` | for the `ai-smoke` / `ai-check` tasks |
+| `GEMINI_API_KEY` | for the `ai-ping` / `ai-smoke` / `ai-check` tasks |
 
 The app itself (e.g. on Render) also needs `PAYOUT_MAX_ITEM_PENCE=30000`, and — only where real sandbox payouts should be possible — `PAYOUTS_ENABLED=true` and `MANAGER_APPROVAL_CODE`.
 
@@ -126,6 +126,7 @@ Repo → **Actions → Integration (manual) → Run workflow**, choose a task:
 - `paypal-test-payout` — sends one £1.00 **sandbox** payout. Does nothing unless **confirm_payout** is ticked. To retry safely, paste the `sender_batch_id` from the previous run's log into **batch_id**.
 - `db-migrate` — applies the database schema. Run it after pulling a new migration (Milestone 2 adds `0001_milestone2.sql`).
 - `db-seed` — loads synthetic demo data (no PayPal calls). Refuses once payment history or pay queries exist.
+- `ai-ping` — **one text-only Gemini request** (no tools, no database, no PayPal). Confirms the key, model and endpoint work; on failure prints a sanitised category, HTTP status, Google error code and timeout flag.
 - `ai-smoke` — **one real Gemini interaction**: question → Gemini calls a tool → our tool runs → verified answer, and checks Gemini's thought signature is sent back unchanged. Run this first.
 - `ai-check` — the **full real-Gemini test**: 7 scenarios (blocked shift, provisional and locked comparisons, no payout, extra-hour claim, cross-worker request, prompt injection), paced for the free tier (~3 min). If the free quota runs out it reports **INCONCLUSIVE** (red), never a pass.
 - Both use an **in-memory** database and never touch Supabase or PayPal. They need the `GEMINI_API_KEY` secret (optional repository *variable* `GEMINI_MODEL`).
@@ -150,6 +151,7 @@ npm run paypal:test-payout -- --confirm
 | `npm run db:migrate` · `npm run db:seed` | Apply schema · load demo data |
 | `npm run paypal:check` | Read-only PayPal feasibility check |
 | `npm run paypal:test-payout -- --confirm [--batch-id ID]` | One £1.00 sandbox payout |
+| `npm run ai:ping` | One text-only Gemini request (connectivity / key / model) |
 | `npm run ai:check [-- --smoke]` | Real Gemini assistant test on an in-memory database |
 
 ## License

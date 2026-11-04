@@ -67,7 +67,9 @@ Legend: ✅ done & verified · 🟡 built, needs external credentials to verify 
 - ✅ Local rehearsals: ai-smoke + ai-check pass against a Gemini-format mock; quota → INCONCLUSIVE; app route → friendly 429; 5/min cap
 - ✅ **Verified by user:** real `ai-smoke` reached Gemini — auth, tool call, tool execution and thought signatures OK; verified-answer check FAILED (fallback shown, 6 calls / ~22.8k input tokens)
 - ✅ Fix: self-verifying `[[fN|value]]` tokens, compact `compare_periods`, compare-only prompt, token list in retry, 4,096 token floor, per-attempt diagnostics (SPEC 32–34) + regression tests
-- 🟡 **Re-run `ai-smoke`** — Gemini is NOT verified until this passes
+- ✅ **Verified by user:** re-run on d63c749 crashed after ~6 s with only "AI service unavailable"
+- ✅ Specific, sanitised provider error diagnostics + `ai-ping` connectivity task (SPEC 35–37) + regression tests
+- 🟡 **Run `ai-ping`**, then **re-run `ai-smoke`** — Gemini is NOT verified until ai-smoke passes
 - 🟡 **Run `ai-check`** (7 real scenarios)
 - 🟡 **Render: add `GEMINI_API_KEY`, `AI_PROVIDER=gemini`, `GEMINI_MODEL`, `AI_DAILY_LIMIT=100`; remove OpenAI vars**
 
