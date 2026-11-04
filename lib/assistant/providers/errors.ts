@@ -40,6 +40,10 @@ export type AiErrorDetails = {
   requestsCompleted?: number;
   /** Shape of the failing request only (model, counts, flags) — never content. */
   request?: string;
+  /** Provider's retry guidance (Retry-After header or Google RetryInfo.retryDelay), in ms. */
+  retryAfterMs?: number;
+  /** Retries made for this request before giving up. */
+  retries?: number;
 };
 
 export class AiProviderError extends Error {
@@ -112,6 +116,26 @@ function providerMessage(e: { error?: unknown; message?: unknown }): string | un
   return msg ? sanitiseProviderText(msg) : undefined;
 }
 
+/** Retry-After header (seconds or HTTP date) or Google's RetryInfo "retryDelay": "7s". Capped at 10 minutes. */
+export function retryAfterMs(e: { headers?: unknown; error?: unknown }, now = Date.now()): number | undefined {
+  const cap = (ms: number) => (Number.isFinite(ms) && ms >= 0 ? Math.min(ms, 600_000) : undefined);
+  const h = e.headers as { get?: (k: string) => string | null } | Record<string, string> | undefined;
+  const raw = typeof (h as { get?: unknown })?.get === "function" ? (h as { get: (k: string) => string | null }).get("retry-after") : (h as Record<string, string> | undefined)?.["retry-after"];
+  if (typeof raw === "string" && raw.trim()) {
+    const secs = Number(raw.trim());
+    if (Number.isFinite(secs)) return cap(secs * 1000);
+    const at = Date.parse(raw);
+    if (!Number.isNaN(at)) return cap(at - now);
+  }
+  try {
+    const m = /"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/.exec(JSON.stringify(e.error ?? ""));
+    if (m) return cap(Number(m[1]) * 1000);
+  } catch {
+    /* ignore */
+  }
+  return undefined;
+}
+
 /** Classify an SDK/HTTP error without leaking provider details to users. */
 export function classifyProviderError(err: unknown): AiProviderError {
   if (err instanceof AiProviderError) return err;
@@ -123,7 +147,7 @@ export function classifyProviderError(err: unknown): AiProviderError {
   const code = providerStatusCode(e);
   const pmsg = providerMessage(e);
   const text = `${typeof e.message === "string" ? e.message : ""} ${code ?? ""} ${pmsg ?? ""}`;
-  const base = { providerCode: code, providerMessage: pmsg, timedOut: false };
+  const base = { providerCode: code, providerMessage: pmsg, timedOut: false, retryAfterMs: retryAfterMs(e as { headers?: unknown; error?: unknown }) };
 
   // No HTTP response at all: timeout or network.
   if (status === undefined) {
@@ -168,6 +192,14 @@ const HINTS: Record<AiErrorKind, string> = {
   internal: "The failure happened in our adapter, not at Gemini. This is a code bug to fix.",
 };
 
+/** Shown to the worker when Gemini is still over capacity after the bounded retries. */
+export const GEMINI_BUSY_MESSAGE = "Gemini is temporarily busy. Your financial records are safe. Please try again shortly.";
+
+/** Google is temporarily over capacity (HTTP 503 / UNAVAILABLE) — the only error we retry. */
+export function isTemporarilyBusy(e: AiProviderError) {
+  return e.kind === "server" && e.status === 503;
+}
+
 /** Safe, multi-line diagnostic for logs/scripts. Never includes keys, headers or bodies. */
 export function describeProviderError(err: unknown): string[] {
   const e = classifyProviderError(err);
@@ -180,6 +212,8 @@ export function describeProviderError(err: unknown): string[] {
     `stage: ${d.stage ?? "unknown"}`,
     `requests completed before the error: ${d.requestsCompleted ?? "unknown"}`,
   ];
+  if (d.retries !== undefined) lines.push(`retries made: ${d.retries}`);
+  if (d.retryAfterMs !== undefined) lines.push(`provider retry guidance: ${Math.round(d.retryAfterMs / 1000)} s`);
   if (d.request) lines.push(`failing request shape: ${d.request}`);
   lines.push(`hint: ${HINTS[e.kind]}`);
   return lines;

@@ -2,4 +2,4 @@
 import "server-only";
 
 export { createModelClient, providerConfig } from "./providers";
-export { AiProviderError, describeProviderError } from "./providers/errors";
+export { AiProviderError, describeProviderError, GEMINI_BUSY_MESSAGE, isTemporarilyBusy } from "./providers/errors";

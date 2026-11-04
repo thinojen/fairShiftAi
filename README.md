@@ -17,6 +17,10 @@ Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/). UK 
 - **AI assistant** — ask "Why were my tips lower last Friday?" or "Have I been paid?". It investigates your records with tools and explains — it never calculates, changes records or moves money.
 - **AI-assisted pay queries** — say "I actually worked an extra hour" and the assistant prepares a query with evidence. *You* click to create the draft and to send it; the manager reviews it in an inbox.
 
+## When Gemini is busy
+
+Google's free tier sometimes answers HTTP 503 "model is experiencing high demand". The app then retries **only that error**, at most **twice per request** and **three times per question**, waiting about 1–2 s then 2–4 s (or what Google's Retry-After says, if it's 15 s or less). A retry re-sends the identical request, thought signatures included; tools only run after a successful response, so nothing is looked up or proposed twice and nothing financial can be repeated. Quota (429), key, request and other errors are never retried. If Google is still busy, the worker sees: *"Gemini is temporarily busy. Your financial records are safe. Please try again shortly."* — never an invented answer. No paid model or billing is ever used as a fallback.
+
 ## How the AI is kept honest
 > **AI investigates and explains. Deterministic code calculates. Humans authorise. PayPal moves the money.**
 
@@ -91,7 +95,7 @@ The repo includes a Render Blueprint (`render.yaml`) for the **public demo**: pa
 2. **New → Blueprint**, pick the `fairShiftAi` repository, and confirm the `render.yaml` it finds.
 3. Render asks for the two secret values: paste `DATABASE_URL` and `PAYPAL_SANDBOX_RECIPIENTS`. Click **Apply**.
 4. Wait for the build (a few minutes). When the service shows **Live**, open its `…onrender.com` URL.
-5. Check `…onrender.com/api/health` shows `"payoutsEnabled": false`.
+5. Check `…onrender.com/api/health` shows `"payoutsEnabled": false` and, under `"ai"`, `"enabled": true`, `"provider": "gemini"`, `"model": "gemini-3.5-flash-lite"`, `"apiKeyConfigured": true`. (It never shows the key itself.)
 
 The free plan sleeps after inactivity, so the first page load can take up to a minute.
 
@@ -128,7 +132,7 @@ Repo → **Actions → Integration (manual) → Run workflow**, choose a task:
 - `db-seed` — loads synthetic demo data (no PayPal calls). Refuses once payment history or pay queries exist.
 - `ai-ping` — **one text-only Gemini request** (no tools, no database, no PayPal). Confirms the key, model and endpoint work; on failure prints a sanitised category, HTTP status, Google error code and timeout flag.
 - `ai-smoke` — **one real Gemini interaction**: question → Gemini calls a tool → our tool runs → verified answer, and checks Gemini's thought signature is sent back unchanged. Run this first.
-- `ai-check` — the **full real-Gemini test**: 7 scenarios (blocked shift, provisional and locked comparisons, no payout, extra-hour claim, cross-worker request, prompt injection), paced for the free tier (~3 min). If the free quota runs out it reports **INCONCLUSIVE** (red), never a pass.
+- `ai-check` — the **full real-Gemini test**: 7 scenarios (1 blocked shift, 2 provisional and 3 locked comparisons, 4 no payout, 5 extra-hour claim, 6 cross-worker request, 7 prompt injection), paced for the free tier. Put numbers in **scenarios** (e.g. `2` or `2,5`) to run just those, each on a fresh in-memory database. Each scenario is PASS, FAIL (an app/config problem), INCONCLUSIVE (Google busy after retries, network, or quota — **not** a pass) or NOT RUN.
 - Both use an **in-memory** database and never touch Supabase or PayPal. They need the `GEMINI_API_KEY` secret (optional repository *variable* `GEMINI_MODEL`).
 
 Open the run and click the job to read the output. Secrets are masked in logs.

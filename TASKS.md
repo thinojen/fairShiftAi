@@ -71,7 +71,12 @@ Legend: ✅ done & verified · 🟡 built, needs external credentials to verify 
 - ✅ Specific, sanitised provider error diagnostics + `ai-ping` connectivity task (SPEC 35–37) + regression tests
 - ✅ **Verified by user:** `ai-ping` and `ai-smoke` both got HTTP 503 UNAVAILABLE ("high demand") from `gemini-3.1-flash-lite`
 - ✅ Default model switched to `gemini-3.5-flash-lite` (SPEC 38)
-- 🟡 **Run `ai-ping`**, then **`ai-smoke`** on the new model — Gemini is NOT verified until ai-smoke passes
+- ✅ **Verified by user:** real `ai-smoke` PASSED on `gemini-3.5-flash-lite` (tool calling + thought signatures + verified answer)
+- ✅ Verified by user: full `ai-check` hit HTTP 503 "high demand" after 3 good responses (provider capacity)
+- ✅ Bounded 503 retries, busy message, /api/health AI settings, per-scenario ai-check outcomes (SPEC 39–42) + regression tests
+- ✅ Local end-to-end Sam journey on a production build with real PostgreSQL and a Gemini-format MOCK (first request 503 → retried): correction → question → −£111.69 → extra hour → draft → sent → manager inbox with evidence. Not a live test.
+- 🟡 **Render:** set `GEMINI_MODEL=gemini-3.5-flash-lite`, check `/api/health`, try Sam's questions on the live site
+- 🟡 Full `ai-check` again (or the unfinished scenarios only)
 - 🟡 Render: set `GEMINI_MODEL=gemini-3.5-flash-lite` in the dashboard (existing services keep their old value)
 - 🟡 **Run `ai-check`** (7 real scenarios)
 - 🟡 **Render: add `GEMINI_API_KEY`, `AI_PROVIDER=gemini`, `GEMINI_MODEL`, `AI_DAILY_LIMIT=100`; remove OpenAI vars**

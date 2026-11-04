@@ -11,8 +11,8 @@ name: Integration (manual)
 #   ai-ping             ONE text-only Gemini request (connectivity, key, model). No tools, DB or PayPal.
 #   ai-smoke            ONE real Gemini interaction (tool call + thought signature + grounded answer).
 #                       Run this first. In-memory database; never touches Supabase or PayPal.
-#   ai-check            The full real-Gemini test: 7 scenarios, paced for the free tier (~3 min).
-#                       Quota exhaustion is reported as INCONCLUSIVE (red), never as a pass.
+#   ai-check            The real-Gemini test: 7 scenarios (or the ones listed in "scenarios"), paced for
+#                       the free tier. Google busy / quota = INCONCLUSIVE (red), never a pass.
 on:
   workflow_dispatch:
     inputs:
@@ -25,6 +25,10 @@ on:
         description: "paypal-test-payout only — tick to really send £1.00 in the PayPal SANDBOX"
         type: boolean
         default: false
+      scenarios:
+        description: "ai-check only — scenario numbers to run, e.g. 2 or 2,5 (empty = all 7)"
+        type: string
+        default: ""
       batch_id:
         description: "paypal-test-payout only — paste a previous sender_batch_id to RETRY it safely (leave empty for a new payout)"
         type: string
@@ -106,9 +110,10 @@ jobs:
 
       - name: AI assistant check (real Gemini, 7 scenarios, in-memory DB)
         if: inputs.task == 'ai-check'
-        timeout-minutes: 8
+        timeout-minutes: 12
         env:
           AI_PROVIDER: gemini
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.5-flash-lite' }}
+          AI_CHECK_SCENARIOS: ${{ inputs.scenarios }}
         run: npm run ai:check

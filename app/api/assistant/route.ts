@@ -1,14 +1,14 @@
 /**
  * POST /api/assistant — the worker's AI assistant.
  *
- * Server-side only: the OpenAI key never reaches the browser. The worker is
+ * Server-side only: the AI provider key never reaches the browser. The worker is
  * taken from the demo role cookie (a demo mechanism, not authentication) and
  * every tool is scoped to them. Limits are keyed on the client IP plus global
  * counters, so switching the demo worker doesn't reset them.
  */
 import { headers } from "next/headers";
 import { assistantLimiter, LIMITS } from "@/lib/assistant/limits";
-import { AiProviderError, createModelClient, describeProviderError, providerConfig } from "@/lib/assistant/server";
+import { AiProviderError, createModelClient, describeProviderError, GEMINI_BUSY_MESSAGE, isTemporarilyBusy, providerConfig } from "@/lib/assistant/server";
 import { runAssistant, type ChatTurn } from "@/lib/assistant/run";
 import { getDb } from "@/lib/db/client";
 import { getDemoRole } from "@/lib/demo/role";
@@ -69,6 +69,8 @@ export async function POST(request: Request) {
         return bad(429, "The free AI quota for this demo is used up for now. Please try again later — your figures on this page are unaffected.");
       }
       if (err.kind === "auth") return bad(503, "The assistant isn't configured correctly on this server.");
+      // Still 503 after the bounded retries: say so plainly. Never a made-up answer.
+      if (isTemporarilyBusy(err)) return bad(503, GEMINI_BUSY_MESSAGE);
       return bad(502, "The AI service didn't respond properly. Please try again in a moment.");
     }
     const cause = err instanceof Error && err.cause instanceof Error ? ` — cause: ${err.cause.message}` : "";

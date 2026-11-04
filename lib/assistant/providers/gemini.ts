@@ -12,7 +12,7 @@
  * Gemini EXPLICITLY rejects that combination do we retry once without it; the
  * loop still validates the JSON shape and every fact either way.
  */
-import { AiProviderError, classifyProviderError } from "./errors";
+import { AiProviderError, classifyProviderError, isTemporarilyBusy } from "./errors";
 import type { ModelClient, ModelOutputItem, ModelResponse } from "../run";
 
 export const GEMINI_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/";
@@ -124,7 +124,7 @@ let callCounter = 0;
 export function fromChatResponse(resp: ChatResponse, wantJson: boolean): ModelResponse {
   const msg = resp.choices?.[0]?.message;
   const finish_reason = resp.choices?.[0]?.finish_reason ?? null;
-  if (!msg) throw new AiProviderError("AI returned no message", "server", undefined, { providerCode: "EMPTY_RESPONSE", providerMessage: `no choices[0].message (finish_reason=${String(finish_reason)})` });
+  if (!msg) throw new AiProviderError("AI returned no message", "server", 200, { providerCode: "EMPTY_RESPONSE", providerMessage: `no choices[0].message (finish_reason=${String(finish_reason)})` });
   const usage = { input_tokens: resp.usage?.prompt_tokens ?? 0, output_tokens: resp.usage?.completion_tokens ?? 0 };
 
   const toolCalls = msg.tool_calls ?? [];
@@ -187,10 +187,74 @@ export function describeRequest(req: ChatRequest): string {
   ].join(", ");
 }
 
-/** A ModelClient backed by Gemini's OpenAI-compatible Chat Completions endpoint. */
-export function geminiModelClient(transport: ChatTransport, model: string): ModelClient & { responseFormatDisabled: () => boolean; requestsCompleted: () => number } {
+/**
+ * Retries for HTTP 503 ("model is experiencing high demand") ONLY. Never for
+ * auth, quota (429), bad requests, 5xx other than 503, or network errors.
+ *
+ * Safe by construction: a retry re-sends the SAME request object (same
+ * messages, same replayed thought signatures). Tools only run in the loop
+ * after a successful response, so a retry can never run a tool twice.
+ */
+export type RetryPolicy = {
+  /** Retries per failed request (not counting the first attempt). */
+  maxRetries: number;
+  /** Retries shared by every request in one question (keeps a busy spell from multiplying traffic). */
+  budgetPerQuestion: number;
+  baseDelayMs: number;
+  maxDelayMs: number;
+  /** If Google asks us to wait longer than this, give up instead of making the worker wait. */
+  maxRetryAfterMs: number;
+  sleep?: (ms: number) => Promise<void>;
+  random?: () => number;
+  onRetry?: (info: { attempt: number; delayMs: number; stage: string }) => void;
+};
+
+export const DEFAULT_RETRY: RetryPolicy = { maxRetries: 2, budgetPerQuestion: 3, baseDelayMs: 2000, maxDelayMs: 8000, maxRetryAfterMs: 15_000 };
+export const NO_RETRY: RetryPolicy = { ...DEFAULT_RETRY, maxRetries: 0, budgetPerQuestion: 0 };
+
+/** Exponential backoff with "equal jitter": attempt 0 → 1–2 s, attempt 1 → 2–4 s (defaults). */
+export function backoffDelay(attempt: number, p: Pick<RetryPolicy, "baseDelayMs" | "maxDelayMs">, random = Math.random) {
+  const ceiling = Math.min(p.maxDelayMs, p.baseDelayMs * 2 ** attempt);
+  return Math.round(ceiling / 2 + random() * (ceiling / 2));
+}
+
+/**
+ * A ModelClient backed by Gemini's OpenAI-compatible Chat Completions endpoint.
+ * Create one per question: the retry budget lives on the client.
+ */
+export function geminiModelClient(
+  transport: ChatTransport,
+  model: string,
+  retry: RetryPolicy = DEFAULT_RETRY,
+): ModelClient & { responseFormatDisabled: () => boolean; requestsCompleted: () => number; retriesUsed: () => number } {
   let rejectsResponseFormat = false;
   let completed = 0;
+  let retriesUsed = 0;
+  const sleep = retry.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const random = retry.random ?? Math.random;
+  const onRetry =
+    retry.onRetry ?? ((i: { attempt: number; delayMs: number; stage: string }) => console.warn(`gemini busy (HTTP 503) — retry ${i.attempt}/${retry.maxRetries} in ${i.delayMs} ms (${i.stage})`));
+
+  /** One HTTP call with bounded 503 retries. The SAME req is re-sent each time. */
+  const callWithRetry = async (req: ChatRequest, stage: string): Promise<ChatResponse> => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await transport(req);
+      } catch (err) {
+        const e = classifyProviderError(err);
+        const canRetry = isTemporarilyBusy(e) && attempt < retry.maxRetries && retriesUsed < retry.budgetPerQuestion;
+        const guidance = e.details.retryAfterMs;
+        if (!canRetry || (guidance !== undefined && guidance > retry.maxRetryAfterMs)) {
+          e.details = { ...e.details, retries: attempt };
+          throw Object.assign(err instanceof Error ? err : e, { __classified: e });
+        }
+        const delayMs = guidance !== undefined ? guidance + Math.round(random() * 250) : backoffDelay(attempt, retry, random);
+        retriesUsed++;
+        onRetry({ attempt: attempt + 1, delayMs, stage });
+        await sleep(delayMs);
+      }
+    }
+  };
   const formatRejections = new WeakSet<AiProviderError>();
 
   /** Attach safe diagnostics (stage, request count, request shape) to a classified error. */
@@ -203,6 +267,7 @@ export function geminiModelClient(transport: ChatTransport, model: string): Mode
   return {
     responseFormatDisabled: () => rejectsResponseFormat,
     requestsCompleted: () => completed,
+    retriesUsed: () => retriesUsed,
     async create(params) {
       const wantJson = Boolean((params.text as { format?: unknown } | undefined)?.format);
       const stage = describeStage(params);
@@ -215,9 +280,10 @@ export function geminiModelClient(transport: ChatTransport, model: string): Mode
         }
         let res: ChatResponse;
         try {
-          res = await transport(req);
+          res = await callWithRetry(req, label);
         } catch (err) {
-          const e = fail(err, label, req);
+          const pre = (err as { __classified?: AiProviderError }).__classified;
+          const e = fail(pre ?? err, label, req);
           // Decided on the RAW API error (full text), exactly as before.
           if (isResponseFormatRejection(err)) formatRejections.add(e);
           throw e;

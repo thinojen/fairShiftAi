@@ -10,7 +10,7 @@
 import OpenAI from "openai";
 import type { ModelClient, ModelResponse } from "../run";
 import { classifyProviderError } from "./errors";
-import { DEFAULT_GEMINI_MODEL, GEMINI_OPENAI_BASE_URL, geminiModelClient, type ChatResponse } from "./gemini";
+import { DEFAULT_GEMINI_MODEL, DEFAULT_RETRY, GEMINI_OPENAI_BASE_URL, geminiModelClient, type ChatResponse, type RetryPolicy } from "./gemini";
 
 type Env = Record<string, string | undefined>;
 
@@ -45,12 +45,13 @@ export function providerConfig(env: Env = process.env): ProviderConfig {
   return { ok: false, reason: `Unknown AI_PROVIDER "${provider}".` };
 }
 
-export function createModelClient(cfg: Extract<ProviderConfig, { ok: true }>, opts: { baseURL?: string; timeoutMs?: number } = {}): ModelClient {
+export function createModelClient(cfg: Extract<ProviderConfig, { ok: true }>, opts: { baseURL?: string; timeoutMs?: number; retry?: RetryPolicy } = {}): ModelClient {
   if (cfg.provider === "gemini") {
-    // maxRetries 0: never burn free-tier quota on automatic retries (a 429 is reported, not retried).
+    // SDK maxRetries 0: the SDK would also retry 429s and burn free quota. Our adapter retries
+    // HTTP 503 only, bounded (DEFAULT_RETRY). Create one client per question: the retry budget lives on it.
     // GEMINI_BASE_URL exists only so tests/local harnesses can point at a mock server.
     const sdk = new OpenAI({ apiKey: cfg.apiKey, baseURL: opts.baseURL ?? process.env.GEMINI_BASE_URL ?? GEMINI_OPENAI_BASE_URL, timeout: opts.timeoutMs ?? 45_000, maxRetries: 0 });
-    return geminiModelClient(async (req) => (await sdk.chat.completions.create(req as never)) as unknown as ChatResponse, cfg.model);
+    return geminiModelClient(async (req) => (await sdk.chat.completions.create(req as never)) as unknown as ChatResponse, cfg.model, opts.retry ?? DEFAULT_RETRY);
   }
   const sdk = new OpenAI({ apiKey: cfg.apiKey, baseURL: opts.baseURL, timeout: 45_000, maxRetries: 1 });
   return {

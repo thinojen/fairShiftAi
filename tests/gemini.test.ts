@@ -8,8 +8,10 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { UsageLimiter, LIMITS, dailyLimitFromEnv, aiAvailability } from "@/lib/assistant/limits";
-import { AiProviderError, classifyProviderError, describeProviderError, sanitiseProviderText } from "@/lib/assistant/providers/errors";
-import { extractJsonText, fromChatResponse, geminiModelClient, isResponseFormatRejection, toChatRequest, toGeminiSchema } from "@/lib/assistant/providers/gemini";
+import { AiProviderError, classifyProviderError, describeProviderError, GEMINI_BUSY_MESSAGE, isTemporarilyBusy, sanitiseProviderText } from "@/lib/assistant/providers/errors";
+import { payoutAvailability } from "@/lib/payouts/approval";
+import { healthReport } from "@/lib/health";
+import { backoffDelay, DEFAULT_RETRY, type RetryPolicy, extractJsonText, fromChatResponse, geminiModelClient, isResponseFormatRejection, toChatRequest, toGeminiSchema } from "@/lib/assistant/providers/gemini";
 import { createModelClient, providerConfig } from "@/lib/assistant/providers";
 import { parseAnswerShape, runAssistant } from "@/lib/assistant/run";
 import { TOOLS } from "@/lib/assistant/tools";
@@ -21,7 +23,7 @@ import { createTestDb } from "./helpers/pglite";
 // ---------------------------------------------------------------------------
 // A local Gemini-compatible server.
 type Req = { body: Record<string, unknown> };
-type Handler = (req: Req, n: number) => { status: number; json: unknown; delayMs?: number };
+type Handler = (req: Req, n: number) => { status: number; json: unknown; delayMs?: number; headers?: Record<string, string> };
 let server: http.Server;
 let baseURL = "";
 let handler: Handler = () => ({ status: 500, json: {} });
@@ -37,7 +39,7 @@ beforeAll(async () => {
       const r = handler({ body }, seen.length);
       setTimeout(() => {
         if (res.destroyed) return;
-        res.writeHead(r.status, { "content-type": "application/json" });
+        res.writeHead(r.status, { "content-type": "application/json", ...(r.headers ?? {}) });
         res.end(JSON.stringify(r.json));
       }, r.delayMs ?? 0);
     });
@@ -75,10 +77,14 @@ let close: () => Promise<void>;
 beforeEach(async () => {
   ({ db, close } = await createTestDb());
   seen.length = 0;
+  delays.length = 0;
 }, 30_000);
 afterEach(async () => close());
 
-const gemini = () => createModelClient({ ok: true, provider: "gemini", apiKey: "test-key", model: "gemini-3.5-flash-lite" }, { baseURL });
+// Retries use the production policy, with an instant sleep that records the delays.
+const delays: number[] = [];
+const fastRetry: RetryPolicy = { ...DEFAULT_RETRY, sleep: async (ms) => void delays.push(ms), onRetry: () => {} };
+const gemini = () => createModelClient({ ok: true, provider: "gemini", apiKey: "test-key", model: "gemini-3.5-flash-lite" }, { baseURL, retry: fastRetry });
 const ask = (message: string, history: Array<{ role: "user" | "assistant"; content: string }> = []) =>
   runAssistant({ db, workerId: "w_sam", workerFirstName: "Sam", history, message, client: gemini(), model: "gemini-3.5-flash-lite" });
 const fixSam = () =>
@@ -378,8 +384,8 @@ describe("provider error diagnostics (sanitised)", () => {
       n === 1 ? { status: 200, json: chat(toolCallMsg("compare_periods", { earlier_shift_id: null, later_shift_id: null })) } : { status: 503, json: gErr(503, "UNAVAILABLE", "The model is overloaded. Please try again later.") };
     const e = await failWith(ask("Why did I earn less this Friday than last Friday?"));
     expect(e).toMatchObject({ kind: "server", status: 503 });
-    expect(e.details).toMatchObject({ providerCode: "UNAVAILABLE", requestsCompleted: 1, stage: expect.stringMatching(/^follow-up after tool results/) });
-    expect(seen).toHaveLength(2); // no automatic retry
+    expect(e.details).toMatchObject({ providerCode: "UNAVAILABLE", requestsCompleted: 1, retries: 2, stage: expect.stringMatching(/^follow-up after tool results/) });
+    expect(seen).toHaveLength(4); // 1 tool round + the follow-up tried 3 times (2 bounded retries)
   });
 
   it("connection timeout → network failure, timed out = yes, no HTTP status", async () => {
@@ -426,7 +432,7 @@ describe("provider error diagnostics (sanitised)", () => {
   it("an empty response is a server error at the 'reading the response' stage; our own bugs are 'internal', not 'unavailable'", async () => {
     handler = () => ({ status: 200, json: { id: "x", object: "chat.completion", choices: [] } });
     const e = await failWith(ask("hi"));
-    expect(e).toMatchObject({ kind: "server" });
+    expect(e).toMatchObject({ kind: "server", status: 200 }); // Gemini answered, but with no message
     expect(e.details).toMatchObject({ providerCode: "EMPTY_RESPONSE", requestsCompleted: 1, stage: expect.stringMatching(/reading Gemini's response$/) });
 
     const buggy = geminiModelClient(async () => {
@@ -453,5 +459,136 @@ describe("provider error diagnostics (sanitised)", () => {
     const r = await ask("hi");
     expect(r.verified).toBe(true);
     expect(seen).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reliability: bounded retries for Google's HTTP 503 "high demand" only.
+
+describe("Gemini 503 retries (bounded, safe)", () => {
+  const busy = { status: 503, json: [{ error: { code: 503, status: "UNAVAILABLE", message: "This model is currently experiencing high demand. Spikes in demand are usually temporary." } }] };
+  const failWith = async (p: Promise<unknown>) => {
+    try {
+      await p;
+    } catch (e) {
+      return e as AiProviderError;
+    }
+    throw new Error("expected a failure");
+  };
+
+  it("503 on the follow-up → retried with the IDENTICAL request (thought signature intact); the tool ran once; verified answer", async () => {
+    await fixSam();
+    handler = ({ body }, n) => {
+      if (n === 1) return { status: 200, json: chat(toolCallMsg("compare_periods", { earlier_shift_id: null, later_shift_id: null })) };
+      if (n === 2) return busy;
+      const missing = requireSignature(body);
+      if (missing) return missing;
+      const tool = (body.messages as Array<Record<string, unknown>>).find((m) => m.role === "tool")!;
+      return { status: 200, json: chat({ role: "assistant", content: answerJson(`You earned [[${factOf(tool, ["difference_in_your_share"])}]] compared with last Friday. This figure is provisional.`) }) };
+    };
+    const r = await ask("Why did I earn less this Friday than last Friday?");
+    expect(r.verified).toBe(true);
+    expect(r.segments.map((x) => (x.type === "text" ? x.text : x.display)).join("")).toContain("−£111.69");
+    expect(r.toolCalls).toEqual([{ name: "compare_periods", ok: true }]); // no duplicate tool execution
+    expect(seen).toHaveLength(3);
+    expect(seen[2]).toEqual(seen[1]); // byte-for-byte the same conversation, signature included
+    expect(JSON.stringify(seen[2])).toContain(SIG);
+    expect(delays).toHaveLength(1);
+    expect(delays[0]).toBeGreaterThanOrEqual(1000);
+    expect(delays[0]).toBeLessThanOrEqual(2000);
+    expect(await db.select().from(s.payQueries)).toHaveLength(0);
+  });
+
+  it("at most two retries per request: three 503s → gives up with the busy error", async () => {
+    handler = () => busy;
+    const e = await failWith(ask("hi"));
+    expect(e).toMatchObject({ kind: "server", status: 503 });
+    expect(e.details.retries).toBe(2);
+    expect(seen).toHaveLength(3);
+    expect(delays).toHaveLength(2);
+    expect(delays[1]).toBeGreaterThanOrEqual(2000); // exponential: 1–2 s, then 2–4 s
+    expect(delays[1]).toBeLessThanOrEqual(4000);
+  });
+
+  it("a whole question shares a budget of three retries (a busy spell can't multiply traffic)", async () => {
+    await fixSam();
+    // Request 1: 503, 503, tool call (2 retries used). Request 2: 503, 503 → budget exhausted after 1 more retry.
+    handler = (_r, n) => (n === 3 ? { status: 200, json: chat(toolCallMsg("compare_periods", { earlier_shift_id: null, later_shift_id: null })) } : busy);
+    const e = await failWith(ask("Why did I earn less?"));
+    expect(e.kind).toBe("server");
+    expect(seen).toHaveLength(5);
+    expect(delays).toHaveLength(3);
+  });
+
+  it("never retries quota (429), auth, bad requests, other 5xx or network errors", async () => {
+    for (const r of [
+      { status: 429, json: [{ error: { code: 429, status: "RESOURCE_EXHAUSTED", message: "quota" } }] },
+      { status: 401, json: [{ error: { code: 401, status: "UNAUTHENTICATED", message: "bad key" } }] },
+      { status: 400, json: [{ error: { code: 400, status: "INVALID_ARGUMENT", message: "bad field" } }] },
+      { status: 404, json: [{ error: { code: 404, status: "NOT_FOUND", message: "no model" } }] },
+      { status: 500, json: [{ error: { code: 500, status: "INTERNAL", message: "oops" } }] },
+    ]) {
+      seen.length = 0;
+      handler = () => r;
+      await failWith(ask("hi"));
+      expect(seen, String(r.status)).toHaveLength(1);
+    }
+    const refused = createModelClient({ ok: true, provider: "gemini", apiKey: "test-key", model: "gemini-3.5-flash-lite" }, { baseURL: "http://127.0.0.1:59999/v1beta/openai/", retry: fastRetry });
+    await failWith(runAssistant({ db, workerId: "w_sam", workerFirstName: "Sam", history: [], message: "hi", client: refused, model: "gemini-3.5-flash-lite" }));
+    expect(delays).toHaveLength(0);
+  });
+
+  it("respects Retry-After when it is short, and gives up at once when it is long", async () => {
+    handler = (_r, n) => (n === 1 ? { ...busy, headers: { "retry-after": "3" } } : { status: 200, json: chat({ role: "assistant", content: answerJson("I can only help with your own tips.") }) });
+    expect((await ask("hi")).verified).toBe(true);
+    expect(delays[0]).toBeGreaterThanOrEqual(3000);
+    expect(delays[0]).toBeLessThan(3300);
+
+    seen.length = 0;
+    delays.length = 0;
+    handler = () => ({ ...busy, headers: { "retry-after": "120" } });
+    const e = await failWith(ask("hi"));
+    expect(seen).toHaveLength(1);
+    expect(delays).toHaveLength(0);
+    expect(e.details.retryAfterMs).toBe(120_000);
+  });
+
+  it("Google's RetryInfo retryDelay in the body is used too", () => {
+    const e = classifyProviderError({ status: 503, error: [{ error: { status: "UNAVAILABLE", details: [{ "@type": "type.googleapis.com/google.rpc.RetryInfo", retryDelay: "7s" }] } }] });
+    expect(e.details.retryAfterMs).toBe(7000);
+  });
+
+  it("backoff is bounded and jittered", () => {
+    expect(backoffDelay(0, DEFAULT_RETRY, () => 0)).toBe(1000);
+    expect(backoffDelay(0, DEFAULT_RETRY, () => 1)).toBe(2000);
+    expect(backoffDelay(1, DEFAULT_RETRY, () => 1)).toBe(4000);
+    expect(backoffDelay(10, DEFAULT_RETRY, () => 1)).toBe(DEFAULT_RETRY.maxDelayMs);
+    expect(DEFAULT_RETRY.maxRetries).toBe(2);
+  });
+
+  it("after retries the worker sees the agreed busy message — and nothing was written", async () => {
+    handler = () => busy;
+    const e = await failWith(ask("hi"));
+    expect(isTemporarilyBusy(e)).toBe(true);
+    expect(GEMINI_BUSY_MESSAGE).toBe("Gemini is temporarily busy. Your financial records are safe. Please try again shortly.");
+    expect(await db.select().from(s.payQueries)).toHaveLength(0);
+    expect(await db.select().from(s.payouts)).toHaveLength(0);
+  });
+});
+
+describe("live configuration (Render)", () => {
+  const LIVE = { AI_PROVIDER: "gemini", GEMINI_MODEL: "gemini-3.5-flash-lite", AI_ENABLED: "true", PAYOUTS_ENABLED: "false", GEMINI_API_KEY: "AIzaSyTESTKEYTESTKEYTESTKEYTESTKEY123" };
+
+  it("reads AI_PROVIDER, GEMINI_MODEL, AI_ENABLED and PAYOUTS_ENABLED exactly as set on Render", () => {
+    expect(providerConfig(LIVE)).toMatchObject({ ok: true, provider: "gemini", model: "gemini-3.5-flash-lite" });
+    expect(payoutAvailability(LIVE)).toMatchObject({ enabled: false });
+    expect(providerConfig({ ...LIVE, AI_ENABLED: "false" })).toMatchObject({ ok: false });
+  });
+
+  it("/api/health reports the settings in use, never the key", () => {
+    const h = healthReport(LIVE);
+    expect(h).toEqual({ ok: true, service: "fairshift-ai", payoutsEnabled: false, ai: { enabled: true, provider: "gemini", model: "gemini-3.5-flash-lite", apiKeyConfigured: true } });
+    expect(JSON.stringify(h)).not.toContain("AIza");
+    expect(healthReport({ ...LIVE, GEMINI_API_KEY: "" }).ai).toMatchObject({ enabled: false, apiKeyConfigured: false });
   });
 });

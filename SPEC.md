@@ -221,3 +221,9 @@ Changes made during implementation. Each is additive or a representation detail;
 
 **Model change (4 Nov 2026)**
 38. **Default model is now `gemini-3.5-flash-lite`** (stable, free tier). `gemini-3.1-flash-lite` returned HTTP 503 UNAVAILABLE ("high demand") even for a text-only `ai-ping`. Adapter unchanged: raw assistant messages are still replayed verbatim, so thought signatures survive for any Gemini 3.x model. Still no billing and no automatic fallback to another model.
+
+**Gemini reliability (4 Nov 2026)**
+39. **Bounded 503 retries** (`lib/assistant/providers/gemini.ts`, `DEFAULT_RETRY`): HTTP 503 only; ≤2 retries per request and ≤3 per question (budget on the per-question client); equal-jitter exponential backoff (1–2 s, 2–4 s, cap 8 s); a Retry-After / RetryInfo of ≤15 s is honoured, longer gives up at once. The identical request object is re-sent (thought signatures intact); tools run only in the loop after a successful response, so retries cannot duplicate tool execution or any write. Never retried: auth, quota (429), 400/404, other 5xx, network. SDK retries stay off. No model fallback.
+40. **Busy message**: after retries the route returns 503 "Gemini is temporarily busy. Your financial records are safe. Please try again shortly." Per-attempt diagnostics are not sent to the browser.
+41. **/api/health** reports the AI settings actually read (enabled, provider, model, whether a key is configured — never the key) alongside `payoutsEnabled`.
+42. **ai-check outcomes**: PASS / FAIL (application or configuration) / INCONCLUSIVE (Google 503 after retries, network, quota) / NOT RUN; `--scenario` (workflow input `scenarios`) runs chosen scenarios on fresh in-memory databases. Overall exit 1 if any FAIL, 2 if any INCONCLUSIVE/NOT RUN, 0 only if every selected scenario passed.
