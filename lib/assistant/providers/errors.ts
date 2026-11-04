@@ -162,7 +162,7 @@ const HINTS: Record<AiErrorKind, string> = {
   auth: "Check the GEMINI_API_KEY secret (a key from Google AI Studio for the right project).",
   quota: "Free-tier quota or rate limit hit. Not a pass or a code failure; wait for the reset and run again.",
   bad_request: "Gemini rejected the request format. The provider message above says which field.",
-  model_unavailable: "Check GEMINI_MODEL (repository variable) is an exact model id available to this key, e.g. gemini-3.1-flash-lite.",
+  model_unavailable: "Check GEMINI_MODEL (repository variable) is an exact model id available to this key, e.g. gemini-3.5-flash-lite.",
   server: "Gemini returned a server error (often temporary overload). Run again later; if it persists, try the ai-ping task.",
   network: "No HTTP response from Gemini (network/DNS/TLS/timeout). Usually transient; run ai-ping to confirm connectivity.",
   internal: "The failure happened in our adapter, not at Gemini. This is a code bug to fix.",

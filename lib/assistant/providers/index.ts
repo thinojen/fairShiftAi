@@ -2,7 +2,7 @@
  * AI provider selection. Configured only through server-side environment
  * variables; keys never reach the browser.
  *
- *   AI_PROVIDER=gemini (default)  GEMINI_API_KEY, GEMINI_MODEL (default gemini-3.1-flash-lite)
+ *   AI_PROVIDER=gemini (default)  GEMINI_API_KEY, GEMINI_MODEL (default gemini-3.5-flash-lite)
  *   AI_PROVIDER=openai            OPENAI_API_KEY, OPENAI_MODEL (optional, paid)
  *
  * There is no automatic fallback to another (possibly paid) provider or model.
@@ -18,7 +18,7 @@ export type ProviderConfig =
   | { ok: true; provider: "gemini" | "openai"; model: string; apiKey: string }
   | { ok: false; reason: string };
 
-/** Lower-case Gemini model ids, e.g. gemini-3.1-flash-lite, gemini-3.5-flash-lite-preview-06-2026. */
+/** Lower-case Gemini model ids, e.g. gemini-3.5-flash-lite, gemini-3.5-flash-lite-preview-06-2026. */
 export function isPlausibleGeminiModelId(model: string) {
   return /^gemini-[a-z0-9][a-z0-9.-]{1,60}$/.test(model);
 }
@@ -33,7 +33,7 @@ export function providerConfig(env: Env = process.env): ProviderConfig {
     // Checked locally so a typo (or a secret pasted into the wrong variable) never reaches the API.
     // The value itself is not echoed back.
     if (!isPlausibleGeminiModelId(model)) {
-      return { ok: false, reason: "GEMINI_MODEL is not a valid Gemini model id (expected something like gemini-3.1-flash-lite)." };
+      return { ok: false, reason: "GEMINI_MODEL is not a valid Gemini model id (expected something like gemini-3.5-flash-lite)." };
     }
     return { ok: true, provider, apiKey, model };
   }

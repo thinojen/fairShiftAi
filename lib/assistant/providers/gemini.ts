@@ -16,7 +16,7 @@ import { AiProviderError, classifyProviderError } from "./errors";
 import type { ModelClient, ModelOutputItem, ModelResponse } from "../run";
 
 export const GEMINI_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/";
-export const DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite";
+export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite";
 
 type JsonObject = Record<string, unknown>;
 type ChatMessage = JsonObject & { role: string };

@@ -51,7 +51,7 @@ Next.js 16 · TypeScript · Tailwind + shadcn/ui · Drizzle ORM · Supabase Post
 | Orders v2 | funding the tip pool | ⬜ planned |
 
 ## AI tools used
-- **Google Gemini API — free tier** (`gemini-3.1-flash-lite`) via Google's OpenAI-compatible Chat Completions endpoint, with server-side function calling and structured output, through a small adapter (`lib/assistant/providers/gemini.ts`) that preserves Gemini 3 thought signatures. No billing is enabled. Note: on the free tier Google may use prompts to improve its products — all data here is synthetic.
+- **Google Gemini API — free tier** (`gemini-3.5-flash-lite`) via Google's OpenAI-compatible Chat Completions endpoint, with server-side function calling and structured output, through a small adapter (`lib/assistant/providers/gemini.ts`) that preserves Gemini 3 thought signatures. No billing is enabled. Note: on the free tier Google may use prompts to improve its products — all data here is synthetic.
 - OpenAI remains available as an optional, paid alternative (`AI_PROVIDER=openai`); it is not used by default.
 - **Claude Code** — used as a coding assistant to build the project.
 
@@ -82,7 +82,7 @@ The repo includes a Render Blueprint (`render.yaml`) for the **public demo**: pa
 | `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET` | not needed yet | added in Milestone 4 for webhooks |
 | `GEMINI_API_KEY` | your free Gemini key | **secret** — server-side only |
 | `AI_PROVIDER` | `gemini` | set by the Blueprint |
-| `GEMINI_MODEL` | `gemini-3.1-flash-lite` | set by the Blueprint |
+| `GEMINI_MODEL` | `gemini-3.5-flash-lite` | set by the Blueprint |
 | `AI_ENABLED` | `true` (`false` = kill switch) | set by the Blueprint |
 | `AI_DAILY_LIMIT` | `100` | set by the Blueprint |
 

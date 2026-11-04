@@ -78,9 +78,9 @@ beforeEach(async () => {
 }, 30_000);
 afterEach(async () => close());
 
-const gemini = () => createModelClient({ ok: true, provider: "gemini", apiKey: "test-key", model: "gemini-3.1-flash-lite" }, { baseURL });
+const gemini = () => createModelClient({ ok: true, provider: "gemini", apiKey: "test-key", model: "gemini-3.5-flash-lite" }, { baseURL });
 const ask = (message: string, history: Array<{ role: "user" | "assistant"; content: string }> = []) =>
-  runAssistant({ db, workerId: "w_sam", workerFirstName: "Sam", history, message, client: gemini(), model: "gemini-3.1-flash-lite" });
+  runAssistant({ db, workerId: "w_sam", workerFirstName: "Sam", history, message, client: gemini(), model: "gemini-3.5-flash-lite" });
 const fixSam = () =>
   correctAssignmentTime(db, { assignmentId: "sa_1030_sam", field: "clock_out", value: "2026-10-30T23:30:00Z", reason: "No clock-out recorded; set to rota end", actor: "m" });
 const factOf = (toolMsg: Record<string, unknown>, path: string[]) => {
@@ -113,7 +113,7 @@ describe("Gemini: one complete interaction over HTTP (function calling + thought
 
     // Request shape sent to Gemini.
     const first = seen[0];
-    expect(first.model).toBe("gemini-3.1-flash-lite");
+    expect(first.model).toBe("gemini-3.5-flash-lite");
     expect((first.messages as Array<{ role: string }>)[0].role).toBe("system");
     expect(first.tool_choice).toBe("auto");
     expect((first.tools as unknown[]).length).toBe(TOOLS.length);
@@ -137,7 +137,7 @@ describe("Gemini: one complete interaction over HTTP (function calling + thought
       const res = await fetch(`${baseURL}chat/completions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(clone) });
       if (!res.ok) throw Object.assign(new Error(await res.text()), { status: res.status });
       return res.json();
-    }, "gemini-3.1-flash-lite");
+    }, "gemini-3.5-flash-lite");
     await expect(runAssistant({ db, workerId: "w_sam", workerFirstName: "Sam", history: [], message: "shifts?", client: stripping, model: "m" })).rejects.toMatchObject({ kind: "bad_request" });
   });
 
@@ -250,7 +250,7 @@ describe("quota, credentials and limits", () => {
   it("missing or wrong configuration disables the assistant with a clear reason", () => {
     expect(providerConfig({})).toMatchObject({ ok: false, reason: expect.stringMatching(/Gemini API key/) }); // gemini is the default
     expect(providerConfig({ AI_PROVIDER: "gemini", GEMINI_API_KEY: "" })).toMatchObject({ ok: false });
-    expect(providerConfig({ AI_PROVIDER: "gemini", GEMINI_API_KEY: "k" })).toMatchObject({ ok: true, model: "gemini-3.1-flash-lite" });
+    expect(providerConfig({ AI_PROVIDER: "gemini", GEMINI_API_KEY: "k" })).toMatchObject({ ok: true, model: "gemini-3.5-flash-lite" });
     expect(providerConfig({ AI_PROVIDER: "gemini", GEMINI_API_KEY: "k", GEMINI_MODEL: "gemini-3.5-flash-lite" })).toMatchObject({ model: "gemini-3.5-flash-lite" });
     expect(providerConfig({ AI_PROVIDER: "gemini", GEMINI_API_KEY: "k", AI_ENABLED: "false" })).toMatchObject({ ok: false });
     expect(providerConfig({ AI_PROVIDER: "mystery", GEMINI_API_KEY: "k" })).toMatchObject({ ok: false });
@@ -303,7 +303,7 @@ describe("schema dialect + request mapping (pure)", () => {
         reasoning: { effort: "low" },
         max_output_tokens: 1200,
       },
-      { model: "gemini-3.1-flash-lite", withResponseFormat: false },
+      { model: "gemini-3.5-flash-lite", withResponseFormat: false },
     );
     expect(req.messages).toEqual([
       { role: "system", content: "SYS" },
@@ -349,7 +349,7 @@ describe("provider error diagnostics (sanitised)", () => {
     expect(e).toMatchObject({ name: "AiProviderError", kind: "model_unavailable", status: 404 });
     expect(e.details).toMatchObject({ providerCode: "NOT_FOUND", timedOut: false, requestsCompleted: 0, stage: expect.stringMatching(/^initial request/) });
     expect(e.details.providerMessage).toMatch(/is not found for API version v1beta/);
-    expect(e.details.request).toMatch(/model=gemini-3.1-flash-lite, messages=2, tools=7, response_format=json_schema/);
+    expect(e.details.request).toMatch(/model=gemini-3.5-flash-lite, messages=2, tools=7, response_format=json_schema/);
     const lines = describeProviderError(e);
     expect(lines[0]).toBe("category: model unavailable (HTTP 404)");
     noSecrets(lines);
@@ -384,16 +384,16 @@ describe("provider error diagnostics (sanitised)", () => {
 
   it("connection timeout → network failure, timed out = yes, no HTTP status", async () => {
     handler = () => ({ status: 200, json: chat({ role: "assistant", content: answerJson("late") }), delayMs: 1500 });
-    const client = createModelClient({ ok: true, provider: "gemini", apiKey: "test-key", model: "gemini-3.1-flash-lite" }, { baseURL, timeoutMs: 200 });
-    const e = await failWith(runAssistant({ db, workerId: "w_sam", workerFirstName: "Sam", history: [], message: "hi", client, model: "gemini-3.1-flash-lite" }));
+    const client = createModelClient({ ok: true, provider: "gemini", apiKey: "test-key", model: "gemini-3.5-flash-lite" }, { baseURL, timeoutMs: 200 });
+    const e = await failWith(runAssistant({ db, workerId: "w_sam", workerFirstName: "Sam", history: [], message: "hi", client, model: "gemini-3.5-flash-lite" }));
     expect(e).toMatchObject({ kind: "network", status: undefined });
     expect(e.details.timedOut).toBe(true);
     expect(describeProviderError(e)).toContain("timed out: yes");
   });
 
   it("connection refused → network failure with the socket code", async () => {
-    const client = createModelClient({ ok: true, provider: "gemini", apiKey: "test-key", model: "gemini-3.1-flash-lite" }, { baseURL: "http://127.0.0.1:59999/v1beta/openai/" });
-    const e = await failWith(runAssistant({ db, workerId: "w_sam", workerFirstName: "Sam", history: [], message: "hi", client, model: "gemini-3.1-flash-lite" }));
+    const client = createModelClient({ ok: true, provider: "gemini", apiKey: "test-key", model: "gemini-3.5-flash-lite" }, { baseURL: "http://127.0.0.1:59999/v1beta/openai/" });
+    const e = await failWith(runAssistant({ db, workerId: "w_sam", workerFirstName: "Sam", history: [], message: "hi", client, model: "gemini-3.5-flash-lite" }));
     expect(e).toMatchObject({ kind: "network" });
     expect(e.details).toMatchObject({ providerCode: "ECONNREFUSED", timedOut: false, requestsCompleted: 0 });
   });
@@ -413,12 +413,12 @@ describe("provider error diagnostics (sanitised)", () => {
   });
 
   it("invalid model configuration is caught locally without echoing the value; a bad name from the API is 'model unavailable'", async () => {
-    for (const bad of ["gpt-4o", "Gemini 3.1 Flash Lite", "AIzaSyD-not-a-model-but-a-key-pasted-here", "gemini-3.1-flash-lite\nx", "gemini-"]) {
+    for (const bad of ["gpt-4o", "Gemini 3.5 Flash Lite", "AIzaSyD-not-a-model-but-a-key-pasted-here", "gemini-3.5-flash-lite\nx", "gemini-"]) {
       const c = providerConfig({ AI_PROVIDER: "gemini", GEMINI_API_KEY: "k", GEMINI_MODEL: bad });
       expect(c, bad).toMatchObject({ ok: false, reason: expect.stringMatching(/GEMINI_MODEL is not a valid Gemini model id/) });
       if (!c.ok && bad !== "gemini-") expect(c.reason).not.toContain(bad); // ("gemini-" is a prefix of the example)
     }
-    expect(providerConfig({ AI_PROVIDER: "gemini", GEMINI_API_KEY: "k", GEMINI_MODEL: "models/gemini-3.1-flash-lite" })).toMatchObject({ ok: true, model: "gemini-3.1-flash-lite" });
+    expect(providerConfig({ AI_PROVIDER: "gemini", GEMINI_API_KEY: "k", GEMINI_MODEL: "models/gemini-3.5-flash-lite" })).toMatchObject({ ok: true, model: "gemini-3.5-flash-lite" });
     handler = () => ({ status: 400, json: gErr(400, "INVALID_ARGUMENT", "* GenerateContentRequest.model: unexpected model name format") });
     expect((await failWith(ask("hi"))).kind).toBe("model_unavailable");
   });
@@ -431,7 +431,7 @@ describe("provider error diagnostics (sanitised)", () => {
 
     const buggy = geminiModelClient(async () => {
       throw new TypeError("Cannot read properties of undefined (reading 'map')");
-    }, "gemini-3.1-flash-lite");
+    }, "gemini-3.5-flash-lite");
     const e2 = await failWith(buggy.create({ input: [{ role: "user", content: "hi" }] }));
     expect(e2.kind).toBe("internal");
     expect(e2.details.providerCode).toBe("TypeError");

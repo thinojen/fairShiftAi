@@ -69,7 +69,10 @@ Legend: ✅ done & verified · 🟡 built, needs external credentials to verify 
 - ✅ Fix: self-verifying `[[fN|value]]` tokens, compact `compare_periods`, compare-only prompt, token list in retry, 4,096 token floor, per-attempt diagnostics (SPEC 32–34) + regression tests
 - ✅ **Verified by user:** re-run on d63c749 crashed after ~6 s with only "AI service unavailable"
 - ✅ Specific, sanitised provider error diagnostics + `ai-ping` connectivity task (SPEC 35–37) + regression tests
-- 🟡 **Run `ai-ping`**, then **re-run `ai-smoke`** — Gemini is NOT verified until ai-smoke passes
+- ✅ **Verified by user:** `ai-ping` and `ai-smoke` both got HTTP 503 UNAVAILABLE ("high demand") from `gemini-3.1-flash-lite`
+- ✅ Default model switched to `gemini-3.5-flash-lite` (SPEC 38)
+- 🟡 **Run `ai-ping`**, then **`ai-smoke`** on the new model — Gemini is NOT verified until ai-smoke passes
+- 🟡 Render: set `GEMINI_MODEL=gemini-3.5-flash-lite` in the dashboard (existing services keep their old value)
 - 🟡 **Run `ai-check`** (7 real scenarios)
 - 🟡 **Render: add `GEMINI_API_KEY`, `AI_PROVIDER=gemini`, `GEMINI_MODEL`, `AI_DAILY_LIMIT=100`; remove OpenAI vars**
 
