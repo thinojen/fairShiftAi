@@ -13,7 +13,9 @@ import {
 } from "@/lib/payqueries/commands";
 import { correctAssignmentTime, saveAllocation } from "@/lib/shifts/commands";
 import { comparePeriods } from "@/lib/tips/compare";
-import { getWorkerOverview, getWorkerShifts } from "@/lib/worker/queries";
+import { getWorkerOverview, getWorkerShifts, shiftEndsAt, venueLocalToUtc } from "@/lib/worker/queries";
+import { FactLedger } from "@/lib/assistant/facts";
+import { executeTool, type ToolContext } from "@/lib/assistant/tools";
 import { createTestDb, TEST_RECIPIENTS } from "./helpers/pglite";
 
 let db: Db;
@@ -27,7 +29,7 @@ const fixSam = () =>
 
 describe("worker read model", () => {
   it("seeded state: 23 Oct provisional £266.46 (v1), 30 Oct blocked, 6 Nov upcoming", async () => {
-    const shifts = await getWorkerShifts(db, "w_sam");
+    const shifts = await getWorkerShifts(db, "w_sam", { now: new Date("2026-11-05T00:29:00Z") });
     const by = Object.fromEntries(shifts.map((x) => [x.date, x]));
     expect(by["2026-10-23"]).toMatchObject({ state: "provisional", sharePence: 26646, workedMinutes: 450, locked: false, policy: { version: 1 } });
     expect(by["2026-10-30"]).toMatchObject({ state: "blocked", sharePence: null, policy: { version: 2 } });
@@ -199,5 +201,113 @@ describe("pay queries", () => {
     await createPayQueryDraft(db, "w_sam", extraHour);
     await expect(db.delete(s.payQueries)).rejects.toThrow();
     await expect(seedDemo(db, { recipientsCsv: TEST_RECIPIENTS.join(",") })).rejects.toThrow(/Refusing/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: on the live site (5 Nov) the dashboard compared 30 Oct with the
+// FUTURE 6 Nov shift (£0 pool) as a £154.77 "decrease", and counted 6 Nov's
+// recorded times as hours worked. "Has it happened?" is now decided by the clock
+// (rota end, venue time), never by whether times happen to be recorded.
+
+describe("future vs completed shifts", () => {
+  const NOV_5 = new Date("2026-11-05T00:29:00Z"); // when the bug was seen
+  const NOV_12 = new Date("2026-11-12T12:00:00Z"); // hackathon demo day: 6 Nov has passed
+  /** The live data: someone recorded clock times on Sam's 6 Nov shift before it happened. */
+  const recordFutureTimes = async () => {
+    await correctAssignmentTime(db, { assignmentId: "sa_1106_sam", field: "clock_in", value: "2026-11-06T17:00:00Z", reason: "Entered ahead of the shift", actor: M });
+    await correctAssignmentTime(db, { assignmentId: "sa_1106_sam", field: "clock_out", value: "2026-11-06T23:00:00Z", reason: "Entered ahead of the shift", actor: M });
+  };
+  const toolCtx = (now: Date): ToolContext => ({ db, workerId: "w_sam", ledger: new FactLedger(), proposals: [], now });
+
+  it("a future shift with recorded times stays Upcoming: no hours worked, no share, not compared", async () => {
+    await fixSam();
+    await recordFutureTimes();
+    const o = (await getWorkerOverview(db, "w_sam", { now: NOV_5 }))!;
+    const nov6 = o.shifts.find((x) => x.date === "2026-11-06")!;
+    expect(nov6).toMatchObject({ state: "upcoming", completed: false, comparisonEligible: false, workedMinutes: null, sharePence: null });
+    expect(nov6.clockIn).not.toBeNull(); // the recorded evidence is kept, just not counted
+
+    // Hours worked = completed shifts only (computed, not hard-coded).
+    const done = o.shifts.filter((x) => x.completed);
+    expect(done.map((x) => x.date).sort()).toEqual(["2026-10-23", "2026-10-24", "2026-10-30"]);
+    expect(o.totals.workedMinutes).toBe(done.reduce((n, x) => n + (x.workedMinutes ?? 0), 0));
+    expect(o.totals.workedMinutes).toBe(450 + 460 + 360); // 7h30 + 7h40 + 6h, not +5h30 from 6 Nov
+
+    // The comparison is the two most recent completed Fridays.
+    expect(o.weekOnWeek!.earlier.date).toBe("2026-10-23");
+    expect(o.weekOnWeek!.later.date).toBe("2026-10-30");
+    const c = o.weekOnWeek!.comparison;
+    if (!c.comparable) throw new Error("expected comparable");
+    expect(c.deltaPence).toBe(o.weekOnWeek!.later.sharePence! - o.weekOnWeek!.earlier.sharePence!);
+    expect(c.deltaPence).toBeLessThan(0);
+    expect(c.b.sharePence).not.toBe(0); // never the £0 future pool
+  });
+
+  it("before anything is recorded, 6 Nov is still Upcoming and excluded", async () => {
+    await fixSam();
+    const o = (await getWorkerOverview(db, "w_sam", { now: NOV_5 }))!;
+    expect(o.shifts.find((x) => x.date === "2026-11-06")!.state).toBe("upcoming");
+    expect([o.weekOnWeek!.earlier.date, o.weekOnWeek!.later.date]).toEqual(["2026-10-23", "2026-10-30"]);
+  });
+
+  it("after 6 Nov has passed but its tips aren't recorded, it isn't '£0 earned' and isn't compared", async () => {
+    await fixSam();
+    await recordFutureTimes();
+    const o = (await getWorkerOverview(db, "w_sam", { now: NOV_12 }))!;
+    const nov6 = o.shifts.find((x) => x.date === "2026-11-06")!;
+    expect(nov6).toMatchObject({ completed: true, comparisonEligible: false, state: "blocked", sharePence: null });
+    expect(nov6.blockedReasons).toEqual(["The tip pool for this shift hasn't been recorded yet"]);
+    expect([o.weekOnWeek!.earlier.date, o.weekOnWeek!.later.date]).toEqual(["2026-10-23", "2026-10-30"]);
+    expect(o.totals.provisionalPence).toBe(o.shifts.filter((x) => x.state === "provisional").reduce((n, x) => n + x.sharePence!, 0));
+  });
+
+  it("once 6 Nov has passed AND its tips are recorded, it becomes the latest comparable Friday", async () => {
+    await fixSam();
+    await recordFutureTimes();
+    await db.update(s.tipPools).set({ grossPence: 48000 }).where(eq(s.tipPools.shiftId, "sh_2026-11-06_dinner"));
+    const o = (await getWorkerOverview(db, "w_sam", { now: NOV_12 }))!;
+    expect(o.shifts.find((x) => x.date === "2026-11-06")).toMatchObject({ completed: true, comparisonEligible: true });
+    expect([o.weekOnWeek!.earlier.date, o.weekOnWeek!.later.date]).toEqual(["2026-10-30", "2026-11-06"]);
+  });
+
+  it("a shift is finished exactly at its latest rota end", async () => {
+    await fixSam();
+    const end = shiftEndsAt("2026-10-30", [new Date("2026-10-30T23:30:00Z"), new Date("2026-10-30T23:00:00Z")]);
+    expect(end.toISOString()).toBe("2026-10-30T23:30:00.000Z");
+    const before = await getWorkerShifts(db, "w_sam", { now: new Date(end.getTime() - 60_000) });
+    const at = await getWorkerShifts(db, "w_sam", { now: end });
+    expect(before.find((x) => x.date === "2026-10-30")).toMatchObject({ completed: false, state: "upcoming" });
+    expect(at.find((x) => x.date === "2026-10-30")).toMatchObject({ completed: true, state: "provisional" });
+  });
+
+  it("uses the venue's time zone (Europe/London, incl. BST) when there is no rota", () => {
+    expect(venueLocalToUtc("2026-07-10", "06:00").toISOString()).toBe("2026-07-10T05:00:00.000Z"); // BST
+    expect(venueLocalToUtc("2026-11-06", "06:00").toISOString()).toBe("2026-11-06T06:00:00.000Z"); // GMT
+    expect(shiftEndsAt("2026-11-06", []).toISOString()).toBe("2026-11-07T06:00:00.000Z");
+    expect(shiftEndsAt("2026-07-10", []).toISOString()).toBe("2026-07-11T05:00:00.000Z");
+  });
+
+  it("Gemini's tools follow the same rules: no comparison with a future shift, no hours or share for it", async () => {
+    await fixSam();
+    await recordFutureTimes();
+    const ctx = toolCtx(NOV_5);
+    const auto = await executeTool(ctx, "compare_periods", JSON.stringify({ earlier_shift_id: null, later_shift_id: null }));
+    const out = auto.output as { comparable: boolean; earlier: { date: { fact: string } }; later: { date: { fact: string } } };
+    expect(out.comparable).toBe(true);
+    expect(ctx.ledger.get(out.earlier.date.fact)!.value).toBe("2026-10-23");
+    expect(ctx.ledger.get(out.later.date.fact)!.value).toBe("2026-10-30");
+
+    const ctx2 = toolCtx(NOV_5);
+    const forced = await executeTool(ctx2, "compare_periods", JSON.stringify({ earlier_shift_id: "sh_2026-10-30_dinner", later_shift_id: "sh_2026-11-06_dinner" }));
+    expect(forced.output).toMatchObject({ comparable: false, reason: expect.stringMatching(/hasn't happened yet/) });
+    expect(JSON.stringify(forced.output)).not.toMatch(/difference_in_your_share|steps/);
+    expect(ctx2.ledger.all().some((f) => f.label.startsWith("Change in"))).toBe(false);
+
+    const ctx3 = toolCtx(NOV_5);
+    const list = await executeTool(ctx3, "get_worker_shifts", "{}");
+    const nov6 = (list.output as { shifts: Array<Record<string, unknown>> }).shifts.find((x) => x.shift_id === "sh_2026-11-06_dinner")!;
+    expect(nov6).toMatchObject({ has_happened: false, hours_worked: expect.stringMatching(/hasn't happened/), your_share: expect.stringMatching(/hasn't happened yet \(not a loss\)/) });
+    expect(ctx3.ledger.all().some((f) => f.source.id === "sh_2026-11-06_dinner" && f.label === "Hours worked")).toBe(false);
   });
 });

@@ -25,6 +25,8 @@ export type ToolContext = {
   workerId: string;
   ledger: FactLedger;
   proposals: PayQueryProposal[];
+  /** The clock used to decide which shifts have finished (tests pin it; defaults to now). */
+  now?: Date;
   /** Cached per turn. */
   shifts?: WorkerShift[];
 };
@@ -47,7 +49,7 @@ const nullableString = (description: string): JsonSchema => ({ type: ["string", 
 const nullableInt = (description: string): JsonSchema => ({ type: ["integer", "null"], description });
 
 async function myShifts(ctx: ToolContext) {
-  ctx.shifts ??= await getWorkerShifts(ctx.db, ctx.workerId);
+  ctx.shifts ??= await getWorkerShifts(ctx.db, ctx.workerId, { now: ctx.now });
   return ctx.shifts;
 }
 
@@ -95,8 +97,10 @@ function shiftSummary(ctx: ToolContext, sh: WorkerShift) {
     clock_in: t(sh.clockIn, "Recorded clock-in"),
     clock_out: t(sh.clockOut, "Recorded clock-out"),
     break: ctx.ledger.add({ kind: "minutes", display: formatMinutes(sh.breakMinutes), label: "Break", source: src, value: sh.breakMinutes }),
-    hours_worked:
-      sh.workedMinutes === null
+    has_happened: sh.completed,
+    hours_worked: !sh.completed
+      ? "none yet — this shift hasn't happened (scheduled hours are not hours worked)"
+      : sh.workedMinutes === null
         ? "unknown (incomplete record)"
         : ctx.ledger.add({ kind: "minutes", display: formatMinutes(sh.workedMinutes), label: "Hours worked", source: src, value: sh.workedMinutes }),
     hours_were_corrected_by_manager: sh.hoursCorrected,
@@ -110,7 +114,7 @@ function shiftSummary(ctx: ToolContext, sh: WorkerShift) {
     policy_version: sh.policy
       ? ctx.ledger.add({ kind: "policy", display: `v${sh.policy.version}`, label: "Tipping policy", source: { type: "policy", id: sh.policy.id, label: `Policy v${sh.policy.version}` }, value: sh.policy.version })
       : "none",
-    your_share: shareFact(ctx, sh) ?? "not calculated",
+    your_share: !sh.completed && !sh.locked ? "none — this shift hasn't happened yet (not a loss)" : (shareFact(ctx, sh) ?? "not calculated"),
     is_payment: sh.state === "paid",
   };
 }

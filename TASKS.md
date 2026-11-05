@@ -79,7 +79,10 @@ Legend: ✅ done & verified · 🟡 built, needs external credentials to verify 
 - ✅ **Verified by user:** live `/worker` crashes — Postgres 42703 `pay_queries.shift_assignment_id` missing (migration 0004 not applied to Supabase)
 - ✅ `db-status` (read-only) + hardened `db-migrate` + regression tests (SPEC 43–45); fix rehearsed on real PostgreSQL from 0003 and 0001 states, all rows preserved
 - 🟡 **Run `db-status` → `db-migrate` → `db-status`**, then reload https://fairshift-ai.onrender.com/worker (not yet verified live)
-- 🟡 Try Sam's questions on the live site
+- ✅ **Verified by user:** live `/worker` loads after the migration
+- ✅ **Verified by user (5 Nov):** dashboard compared 30 Oct with the future 6 Nov (£0) and counted its 5h 30m as worked
+- ✅ Fix: clock-based completion (rota end, venue time), comparison eligibility, Gemini tool parity + regression tests (SPEC 46–48)
+- 🟡 After Render redeploys: check /worker shows 23 Oct vs 30 Oct and 6 Nov as Upcoming; try Sam's questions
 - 🟡 Full `ai-check` again (or the unfinished scenarios only)
 - 🟡 Render: set `GEMINI_MODEL=gemini-3.5-flash-lite` in the dashboard (existing services keep their old value)
 - 🟡 **Run `ai-check`** (7 real scenarios)

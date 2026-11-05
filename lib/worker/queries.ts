@@ -10,6 +10,7 @@ import * as s from "../db/schema";
 import { allocateTips, type Blocker } from "../tips/engine";
 import { comparePeriods, type Comparison, type PeriodFacts, type PeriodState } from "../tips/compare";
 import { policyForDate } from "../tips/policy";
+import { VENUE_TZ } from "../format";
 
 export type WorkerShift = {
   assignmentId: string;
@@ -30,6 +31,17 @@ export type WorkerShift = {
   /** Plain-language reasons when blocked — never names other workers. */
   blockedReasons: string[];
   policy: { id: string; version: number; effectiveFrom: string } | null;
+  /** When the shift's service finishes (latest rota end on the shift, or the venue-local day's end). */
+  endsAt: Date;
+  /** True once the service has finished at `now` (venue time). Future shifts are never "worked". */
+  completed: boolean;
+  /**
+   * May this shift be used in an earnings comparison? Only completed shifts
+   * whose tips have been recorded (a pool above £0, a locked allocation or a
+   * payout). A future shift — or a finished one still awaiting its tip pool —
+   * is never presented as lost earnings.
+   */
+  comparisonEligible: boolean;
   weightsBp: s.TipPolicyRules["weightsBp"] | null;
   grossPence: number;
   isDemoPool: boolean;
@@ -76,7 +88,31 @@ function workerBlockerText(b: Blocker, workerId: string): string {
   }
 }
 
-export async function getWorkerShifts(db: Db, workerId: string): Promise<WorkerShift[]> {
+/** UTC instant of a wall-clock time in the venue's time zone (handles BST/GMT). */
+export function venueLocalToUtc(isoDate: string, hhmm: string, tz = VENUE_TZ): Date {
+  const guess = new Date(`${isoDate}T${hhmm}:00Z`);
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).formatToParts(guess);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)!.value);
+  const asLocal = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"));
+  return new Date(guess.getTime() - (asLocal - guess.getTime()));
+}
+
+/**
+ * When a shift's service is over: the latest ROTA end among everyone on it
+ * (absolute timestamps, so time-zone safe). With no rota, 06:00 venue time the
+ * next day (late services cross midnight). Recorded clock times are ignored on
+ * purpose — a mistyped future clock-out must not make a past shift "upcoming",
+ * and a clock time entered early must not make a future shift "worked".
+ */
+export function shiftEndsAt(date: string, rotaEnds: Date[], tz = VENUE_TZ): Date {
+  if (rotaEnds.length) return new Date(Math.max(...rotaEnds.map((d) => d.getTime())));
+  const next = new Date(`${date}T00:00:00Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  return venueLocalToUtc(next.toISOString().slice(0, 10), "06:00", tz);
+}
+
+export async function getWorkerShifts(db: Db, workerId: string, opts: { now?: Date } = {}): Promise<WorkerShift[]> {
+  const now = opts.now ?? new Date();
   const mine = await db.select().from(s.shiftAssignments).where(eq(s.shiftAssignments.workerId, workerId));
   if (!mine.length) return [];
   const shiftIds = [...new Set(mine.map((a) => a.shiftId))];
@@ -108,6 +144,9 @@ export async function getWorkerShifts(db: Db, workerId: string): Promise<WorkerS
     const payout = batch ? payouts.find((p) => p.batchId === batch.id) : undefined;
     const workedMinutes =
       a.clockIn && a.clockOut ? Math.floor((a.clockOut.getTime() - a.clockIn.getTime()) / 60_000) - a.breakMinutes : null;
+    const endsAt = shiftEndsAt(shift.date, allAssignments.filter((x) => x.shiftId === shift.id).map((x) => x.scheduledEnd));
+    const completed = now.getTime() >= endsAt.getTime();
+    const tipsRecorded = Boolean(saved) || Boolean(payout) || (pool?.grossPence ?? 0) > 0;
 
     const base = {
       assignmentId: a.id,
@@ -128,6 +167,9 @@ export async function getWorkerShifts(db: Db, workerId: string): Promise<WorkerS
       isDemoPool: pool?.isDemo ?? false,
       policy: policy ? { id: policy.id, version: policy.version, effectiveFrom: policy.effectiveFrom } : null,
       weightsBp: policy?.rules.weightsBp ?? null,
+      endsAt,
+      completed,
+      comparisonEligible: completed && tipsRecorded,
       allocationId: saved?.id ?? null,
       payout: payout
         ? {
@@ -170,9 +212,20 @@ export async function getWorkerShifts(db: Db, workerId: string): Promise<WorkerS
       continue;
     }
 
-    const upcoming = a.status === "scheduled" && !a.clockIn && !a.clockOut && (pool?.grossPence ?? 0) === 0;
-    if (upcoming || !pool || !policy) {
-      out.push({ ...base, state: upcoming ? "upcoming" : "blocked", blockedReasons: upcoming ? [] : ["No tip pool or policy for this shift"], eligible: null, excludedReason: null, weightBp: null, points: null, totalPoints: null, eligibleCount: null, sharePence: null, locked: false });
+    // Decided by the clock (venue time), not by whether times happen to be recorded.
+    // Recorded times on a future shift are kept as evidence but never count as worked.
+    const empty = { eligible: null, excludedReason: null, weightBp: null, points: null, totalPoints: null, eligibleCount: null, sharePence: null, locked: false } as const;
+    if (!completed) {
+      out.push({ ...base, workedMinutes: null, state: "upcoming", blockedReasons: [], ...empty });
+      continue;
+    }
+    if (!pool || !policy) {
+      out.push({ ...base, state: "blocked", blockedReasons: ["No tip pool or policy for this shift"], ...empty });
+      continue;
+    }
+    if (pool.grossPence === 0) {
+      // Finished, but no tips recorded yet: nothing to calculate — not "£0 earned".
+      out.push({ ...base, state: "blocked", blockedReasons: ["The tip pool for this shift hasn't been recorded yet"], ...empty });
       continue;
     }
 
@@ -206,12 +259,14 @@ export async function getWorkerShifts(db: Db, workerId: string): Promise<WorkerS
 }
 
 export function toPeriodFacts(w: WorkerShift): PeriodFacts {
-  const hasFigures = w.state !== "blocked" && w.state !== "upcoming";
+  // A shift that hasn't finished is "upcoming" for comparisons even if it already has records.
+  const state: PeriodState = w.completed ? w.state : "upcoming";
+  const hasFigures = state !== "blocked" && state !== "upcoming";
   return {
     shiftId: w.shiftId,
     date: w.date,
     service: w.service,
-    state: w.state,
+    state,
     policyId: w.policy?.id ?? null,
     policyVersion: w.policy?.version ?? null,
     weightsBp: w.weightsBp,
@@ -232,13 +287,17 @@ function addDays(isoDate: string, days: number) {
 }
 
 /**
- * "This Friday vs last Friday": the worker's most recent non-upcoming shift and
- * the same service exactly 7 days earlier, if they worked it.
+ * "This Friday vs last Friday": the worker's most recent COMPLETED shift with
+ * recorded tips, and the same service exactly 7 days earlier (also completed,
+ * with recorded tips). Future shifts — and finished shifts still waiting for
+ * their tip pool — are never used, so unworked time can't look like lost pay.
+ * A completed shift whose hours are incomplete IS used: the comparison then
+ * says it can't be calculated yet, and states no amount.
  */
 export function pickWeekOnWeek(shifts: WorkerShift[]) {
-  const latest = shifts.find((x) => x.state !== "upcoming");
+  const latest = shifts.find((x) => x.comparisonEligible);
   if (!latest) return null;
-  const prior = shifts.find((x) => x.date === addDays(latest.date, -7) && x.service === latest.service);
+  const prior = shifts.find((x) => x.comparisonEligible && x.date === addDays(latest.date, -7) && x.service === latest.service);
   return prior ? { earlier: prior, later: latest } : null;
 }
 
@@ -246,10 +305,10 @@ export function compareWorkerShifts(earlier: WorkerShift, later: WorkerShift): C
   return comparePeriods(toPeriodFacts(earlier), toPeriodFacts(later));
 }
 
-export async function getWorkerOverview(db: Db, workerId: string) {
+export async function getWorkerOverview(db: Db, workerId: string, opts: { now?: Date } = {}) {
   const [worker] = await db.select({ id: s.workers.id, name: s.workers.name, role: s.workers.role }).from(s.workers).where(eq(s.workers.id, workerId));
   if (!worker) return null;
-  const shifts = await getWorkerShifts(db, workerId);
+  const shifts = await getWorkerShifts(db, workerId, opts);
   const queries = await db.select().from(s.payQueries).where(eq(s.payQueries.workerId, workerId)).orderBy(asc(s.payQueries.createdAt));
   const pair = pickWeekOnWeek(shifts);
 
@@ -271,7 +330,8 @@ export async function getWorkerOverview(db: Db, workerId: string) {
       provisionalPence: sum(shifts.filter((x) => x.state === "provisional")),
       blockedCount: shifts.filter((x) => x.state === "blocked").length,
       needsReviewCount: shifts.filter((x) => x.state === "needs_review").length,
-      workedMinutes: shifts.reduce((n, x) => n + (x.state === "upcoming" ? 0 : (x.workedMinutes ?? 0)), 0),
+      /** Only shifts that have finished: scheduled (future) hours are never "worked". */
+      workedMinutes: shifts.reduce((n, x) => n + (x.completed ? (x.workedMinutes ?? 0) : 0), 0),
     },
   };
 }

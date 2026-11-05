@@ -113,9 +113,11 @@ export async function runAssistant(args: {
   message: string;
   client: ModelClient;
   model: string;
+  /** Clock for "has this shift finished?" (defaults to now). */
+  now?: Date;
 }): Promise<AssistantResult> {
   const ledger = new FactLedger();
-  const ctx: ToolContext = { db: args.db, workerId: args.workerId, ledger, proposals: [] };
+  const ctx: ToolContext = { db: args.db, workerId: args.workerId, ledger, proposals: [], now: args.now };
   const toolCalls: AssistantResult["toolCalls"] = [];
   const usage = { inputTokens: 0, outputTokens: 0, modelCalls: 0 };
 

@@ -51,8 +51,9 @@ async function WorkerDashboard({ workerId }: { workerId: string }) {
   if (!o) return <PageBody>Worker not found.</PageBody>;
   const first = o.worker.name.split(" ")[0];
   const ai = aiAvailability();
-  const past = o.shifts.filter((s) => s.state !== "upcoming");
-  const upcoming = o.shifts.filter((s) => s.state === "upcoming");
+  // Split by the clock (venue time): a shift is "past" only once its service has finished.
+  const past = o.shifts.filter((s) => s.completed);
+  const upcoming = o.shifts.filter((s) => !s.completed);
   const queryRows: WorkerQueryRow[] = o.payQueries.map((q) => {
     const sh = o.shifts.find((s) => s.assignmentId === q.shiftAssignmentId);
     const fieldLabel = q.field === "clock_out" ? "Clock-out" : q.field === "clock_in" ? "Clock-in" : "Break";
