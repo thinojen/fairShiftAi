@@ -84,6 +84,7 @@ Legend: ✅ done & verified · 🟡 built, needs external credentials to verify 
 - ✅ Fix: clock-based completion (rota end, venue time), comparison eligibility, Gemini tool parity + regression tests (SPEC 46–48)
 - ✅ **Verified by user:** live Gemini explanation and pay-query workflow
 - ✅ Isolated Codespaces sandbox demo: local-only `demo:setup` (with Sam's accepted query), read-only `paypal:preflight`, banner, devcontainer, docs/SANDBOX_DEMO.md (SPEC 49–53). Rehearsed locally up to the Approve & pay form (not clicked; fake credentials)
+- ✅ Interim development journal with evidence archive: docs/DEVELOPMENT_JOURNAL.md (5 Nov)
 - 🟡 Create Codespace + secrets → `demo:setup` → `paypal:preflight` (online) → share results
 - 🟡 Real sandbox payout through the manager UI — **only after explicit approval**
 - 🟡 Full `ai-check` again (or the unfinished scenarios only)
