@@ -82,7 +82,10 @@ Legend: ✅ done & verified · 🟡 built, needs external credentials to verify 
 - ✅ **Verified by user:** live `/worker` loads after the migration
 - ✅ **Verified by user (5 Nov):** dashboard compared 30 Oct with the future 6 Nov (£0) and counted its 5h 30m as worked
 - ✅ Fix: clock-based completion (rota end, venue time), comparison eligibility, Gemini tool parity + regression tests (SPEC 46–48)
-- 🟡 After Render redeploys: check /worker shows 23 Oct vs 30 Oct and 6 Nov as Upcoming; try Sam's questions
+- ✅ **Verified by user:** live Gemini explanation and pay-query workflow
+- ✅ Isolated Codespaces sandbox demo: local-only `demo:setup` (with Sam's accepted query), read-only `paypal:preflight`, banner, devcontainer, docs/SANDBOX_DEMO.md (SPEC 49–53). Rehearsed locally up to the Approve & pay form (not clicked; fake credentials)
+- 🟡 Create Codespace + secrets → `demo:setup` → `paypal:preflight` (online) → share results
+- 🟡 Real sandbox payout through the manager UI — **only after explicit approval**
 - 🟡 Full `ai-check` again (or the unfinished scenarios only)
 - 🟡 Render: set `GEMINI_MODEL=gemini-3.5-flash-lite` in the dashboard (existing services keep their old value)
 - 🟡 **Run `ai-check`** (7 real scenarios)

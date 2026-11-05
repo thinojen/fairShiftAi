@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { CalendarClock, Inbox, LayoutDashboard, PiggyBank, ScrollText, ShieldCheck, Users, Wallet } from "lucide-react";
+import { CalendarClock, FlaskConical, Inbox, LayoutDashboard, PiggyBank, ScrollText, ShieldCheck, Users, Wallet } from "lucide-react";
 import { switchRoleAction } from "@/app/actions";
 import { NavLink } from "@/components/nav-link";
 import { DEMO_ROLES, roleValue, type DemoRole } from "@/lib/demo/role";
+import { demoBannerLabel } from "@/lib/demo/banner";
 
 const NAV = [
   { href: "/manager", label: "Overview", icon: LayoutDashboard },
@@ -13,6 +14,7 @@ const NAV = [
 ];
 
 export function AppShell({ role, children }: { role: DemoRole; children: React.ReactNode }) {
+  const banner = demoBannerLabel();
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
       <aside className="bg-sidebar text-sidebar-foreground flex shrink-0 flex-col md:sticky md:top-0 md:h-screen md:w-64">
@@ -53,6 +55,12 @@ export function AppShell({ role, children }: { role: DemoRole; children: React.R
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col bg-white">
+        {banner && (
+          <div role="note" className="flex items-center gap-2 border-b border-amber-300 bg-amber-100 px-4 py-2 text-sm font-medium text-amber-950 md:px-8">
+            <FlaskConical className="size-4 shrink-0" />
+            <span>{banner}</span>
+          </div>
+        )}
         <div className="border-b px-4 py-2 md:hidden">
           <RoleSwitcher role={role} light />
         </div>

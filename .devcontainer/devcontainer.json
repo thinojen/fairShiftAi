@@ -1,0 +1,35 @@
+{
+  // FairShift AI — ISOLATED PayPal SANDBOX demo environment (GitHub Codespaces).
+  // A throwaway Postgres runs inside this Codespace; Supabase and Render are never used.
+  // Never add DATABASE_URL as a Codespaces secret — the demo tools refuse non-local databases anyway.
+  "name": "FairShift AI — isolated sandbox demo",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "hostRequirements": { "cpus": 2 },
+  "containerEnv": {
+    "DATABASE_URL": "postgres://postgres:fairshift-local@127.0.0.1:5432/postgres",
+    "DEMO_ENV_LABEL": "Isolated sandbox environment · synthetic data · PayPal SANDBOX",
+    "PAYOUTS_ENABLED": "true",
+    "PAYPAL_ENV": "sandbox",
+    "PAYOUT_MAX_ITEM_PENCE": "20000",
+    "PAYOUT_MAX_BATCH_PENCE": "100000",
+    "AI_PROVIDER": "gemini",
+    "GEMINI_MODEL": "gemini-3.5-flash-lite",
+    "AI_ENABLED": "true"
+  },
+  // Codespaces asks for these when the Codespace is created (stored by GitHub, never in the repo).
+  "secrets": {
+    "PAYPAL_CLIENT_ID": { "description": "PayPal SANDBOX app client ID (Developer Dashboard → Apps & Credentials → Sandbox)" },
+    "PAYPAL_CLIENT_SECRET": { "description": "PayPal SANDBOX app secret" },
+    "PAYPAL_SANDBOX_RECIPIENTS": { "description": "5 sandbox PERSONAL account emails, comma-separated, in order: Sam, Priya, Jordan, Alex, Casey (repeats allowed)" },
+    "MANAGER_APPROVAL_CODE": { "description": "A new code (12+ characters) used only in this demo environment" },
+    "GEMINI_API_KEY": { "description": "Optional: Gemini free-tier key so the assistant works here too" }
+  },
+  "forwardPorts": [3000],
+  "portsAttributes": {
+    "3000": { "label": "FairShift demo — keep PRIVATE", "onAutoForward": "notify" }
+  },
+  "postCreateCommand": "npm ci"
+}

@@ -99,6 +99,10 @@ The repo includes a Render Blueprint (`render.yaml`) for the **public demo**: pa
 
 The free plan sleeps after inactivity, so the first page load can take up to a minute.
 
+## Isolated sandbox payout demo (GitHub Codespaces)
+
+To show a **real PayPal sandbox payout through the manager UI** without touching the public site, run a private, throwaway copy in GitHub Codespaces: a local database inside the Codespace (the demo tools refuse any other), payouts enabled only there, an on-screen "Isolated sandbox environment" banner, and a read-only `paypal:preflight` that checks recipients, limits and sandbox configuration before anything is paid. Step by step: [docs/SANDBOX_DEMO.md](docs/SANDBOX_DEMO.md).
+
 ## For judges: running sandbox payouts yourself
 The public demo has payouts disabled, and the approval code is never published. To try real sandbox payouts, run your own copy:
 1. In the [PayPal Developer dashboard](https://developer.paypal.com) (Sandbox), create an app with **Payouts** enabled and 5 sandbox *personal* accounts.
@@ -156,6 +160,7 @@ npm run paypal:test-payout -- --confirm
 | `npm run db:migrate` · `npm run db:seed` | Apply schema · load demo data |
 | `npm run paypal:check` | Read-only PayPal feasibility check |
 | `npm run paypal:test-payout -- --confirm [--batch-id ID]` | One £1.00 sandbox payout |
+| `npm run demo:db` / `demo:setup` / `paypal:preflight` / `demo:app` | Isolated sandbox demo (local database only) — see docs/SANDBOX_DEMO.md |
 | `npm run db:status` | Read-only schema/migration check of `DATABASE_URL` |
 | `npm run ai:ping` | One text-only Gemini request (connectivity / key / model) |
 | `npm run ai:check [-- --smoke]` | Real Gemini assistant test on an in-memory database |
