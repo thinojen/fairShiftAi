@@ -16,7 +16,7 @@ import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
 import * as schema from "../lib/db/schema";
 import type { Db } from "../lib/db/connect";
-import { assertLocalDatabase, DemoEnvError, runDemoSetup, type DemoQueryState } from "../lib/demo/sandbox";
+import { assertLocalDatabase, DemoEnvError, explainDemoError as explain, runDemoSetup, type DemoQueryState } from "../lib/demo/sandbox";
 
 async function main() {
   const { values } = parseArgs({ options: { query: { type: "string", default: "accepted" } } });
@@ -41,6 +41,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error(`✗ ${e instanceof DemoEnvError ? e.message : e instanceof Error ? e.message.replace(/postgres(ql)?:\/\/[^\s]+/g, "[database url]") : e}`);
+  console.error(`✗ ${explain(e)}`);
   process.exit(1);
 });

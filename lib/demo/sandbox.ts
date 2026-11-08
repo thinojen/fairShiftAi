@@ -51,6 +51,20 @@ export class DemoEnvError extends Error {
   name = "DemoEnvError";
 }
 
+/** A plain-English reason for a failed demo command (never prints the database URL). */
+export function explainDemoError(e: unknown): string {
+  if (e instanceof DemoEnvError) return e.message;
+  let c: unknown = e;
+  for (let i = 0; i < 5 && c; i++) {
+    const code = (c as { code?: unknown }).code;
+    if (code === "ECONNREFUSED") return "Can't connect to the local demo database. Start it with: npm run demo:db";
+    if (code === "42P01") return "The demo tables don't exist yet. Run: npm run demo:setup";
+    c = (c as { cause?: unknown }).cause;
+  }
+  const msg = e instanceof Error ? ((e as { cause?: Error }).cause?.message ?? e.message) : String(e);
+  return msg.replace(/postgres(ql)?:\/\/[^\s]+/g, "[database url]");
+}
+
 export function assertLocalDatabase(url: string | undefined) {
   if (!isLocalDatabaseUrl(url)) {
     throw new DemoEnvError(

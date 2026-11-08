@@ -12,7 +12,7 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "../lib/db/schema";
 import type { Db } from "../lib/db/connect";
-import { assertLocalDatabase, DemoEnvError, runPreflight } from "../lib/demo/sandbox";
+import { assertLocalDatabase, explainDemoError as explain, runPreflight } from "../lib/demo/sandbox";
 import { PayPalClient } from "../lib/paypal/client";
 
 async function main() {
@@ -43,6 +43,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error(`✗ ${e instanceof DemoEnvError ? e.message : e instanceof Error ? e.message.replace(/postgres(ql)?:\/\/[^\s]+/g, "[database url]") : e}`);
+  console.error(`✗ ${explain(e)}`);
   process.exit(1);
 });

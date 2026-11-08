@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "@/lib/db/connect";
 import * as s from "@/lib/db/schema";
 import { demoBannerLabel } from "@/lib/demo/banner";
-import { DEMO_SHIFT_ID, isLocalDatabaseUrl, assertLocalDatabase, runDemoSetup, runPreflight } from "@/lib/demo/sandbox";
+import { DEMO_SHIFT_ID, explainDemoError, isLocalDatabaseUrl, assertLocalDatabase, runDemoSetup, runPreflight } from "@/lib/demo/sandbox";
 import { reviewPayQuery } from "@/lib/payqueries/commands";
 import { paypalGateway } from "@/lib/payouts/gateway";
 import { refreshShiftPayoutStatus, requestShiftPayout } from "@/lib/payouts/service";
@@ -69,6 +69,14 @@ describe("local-only guard", () => {
       expect(isLocalDatabaseUrl(bad), String(bad)).toBe(false);
     }
     expect(() => assertLocalDatabase("postgres://u:pw@db.abcd.supabase.co:5432/postgres")).toThrow(/never on Supabase/);
+  });
+
+  it("explains common setup failures in plain English, never printing the database URL", () => {
+    const refused = Object.assign(new Error("Failed query: CREATE SCHEMA"), { cause: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:5432"), { code: "ECONNREFUSED" }) });
+    expect(explainDemoError(refused)).toBe("Can't connect to the local demo database. Start it with: npm run demo:db");
+    const noTables = Object.assign(new Error("Failed query: select"), { cause: Object.assign(new Error('relation "workers" does not exist'), { code: "42P01" }) });
+    expect(explainDemoError(noTables)).toBe("The demo tables don't exist yet. Run: npm run demo:setup");
+    expect(explainDemoError(new Error("boom at postgres://u:secret@127.0.0.1/db"))).toBe("boom at [database url]");
   });
 
   it("the banner shows only when DEMO_ENV_LABEL is set (never on Render)", () => {

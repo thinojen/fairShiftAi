@@ -1,10 +1,13 @@
 import type { NextConfig } from "next";
 
 /**
- * GitHub Codespaces forwards the app through "<codespace>-3000.<domain>". Server
- * Actions reject a browser Origin that differs from the server's host, so in a
- * Codespace (and only there) allow exactly this Codespace's own forwarded host —
- * no wildcard. Render never sets these variables, so production is unchanged.
+ * GitHub Codespaces forwards the app through "<codespace>-3000.<domain>". Its
+ * proxy sends browser requests with `x-forwarded-host: <codespace>-3000.<domain>`
+ * but `origin: localhost:3000`, and Server Actions reject an origin that differs
+ * from the host unless it is allowed. So in a Codespace (and only there) allow
+ * exactly that proxy origin and this Codespace's own forwarded host — no wildcard.
+ * The forwarded port is Private (GitHub sign-in required). Render never sets
+ * these variables, so production is unchanged.
  */
 const codespaceHost =
   process.env.CODESPACE_NAME && process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN
@@ -13,7 +16,7 @@ const codespaceHost =
 
 const nextConfig: NextConfig = {
   cacheComponents: true,
-  ...(codespaceHost ? { experimental: { serverActions: { allowedOrigins: [codespaceHost] } } } : {}),
+  ...(codespaceHost ? { experimental: { serverActions: { allowedOrigins: ["localhost:3000", codespaceHost] } } } : {}),
   partialPrefetching: true,
   poweredByHeader: false,
   turbopack: {

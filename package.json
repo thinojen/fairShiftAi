@@ -17,7 +17,7 @@
     "paypal:test-payout": "tsx scripts/paypal-test-payout.ts",
     "ai:check": "tsx scripts/ai-check.ts",
     "ai:ping": "tsx scripts/ai-ping.ts",
-    "demo:db": "docker run -d --name fairshift-demo-db -e POSTGRES_PASSWORD=fairshift-local -p 127.0.0.1:5432:5432 postgres:16-alpine && until docker exec fairshift-demo-db pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done && echo '✓ Local demo database is running (inside this Codespace only)'",
+    "demo:db": "(docker start fairshift-demo-db >/dev/null 2>&1 || docker run -d --name fairshift-demo-db -e POSTGRES_PASSWORD=fairshift-local -p 127.0.0.1:5432:5432 postgres:16-alpine >/dev/null) && until docker exec fairshift-demo-db pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done && echo '✓ Local demo database is running (inside this Codespace only)'",
     "demo:db:reset": "docker rm -f fairshift-demo-db >/dev/null 2>&1; npm run demo:db",
     "demo:setup": "tsx scripts/demo-setup.ts",
     "paypal:preflight": "tsx scripts/paypal-preflight.ts",
