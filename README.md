@@ -6,7 +6,7 @@ A manager closes a service; FairShift flags missing hours, splits the tip pool u
 
 Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/). UK context: the Employment (Allocation of Tips) Act 2023 requires employers who handle tips to allocate them fairly, keep a written policy and keep records — FairShift produces that audit trail.
 
-> **Status: Milestone 3.** Manager dashboard, tip engine, approved sandbox payouts, the worker dashboard and the AI assistant are built — see [TASKS.md](TASKS.md). Live demo: https://fairshift-ai.onrender.com/
+> **Status: Milestone 3.** Manager dashboard, tip engine, approved sandbox payouts, the worker dashboard and the AI assistant are built — see [TASKS.md](TASKS.md). Live demo: https://fairshift-ai.onrender.com/ · **Demo video (2:51):** https://youtu.be/eb8OwmSrGuw
 >
 > **How we got here:** the [Development Journal](docs/DEVELOPMENT_JOURNAL.md) records every decision, setback and fix — with screenshot evidence and a clear line between what was verified live, what was tested with fake providers, and what is still planned.
 

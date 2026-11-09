@@ -7,6 +7,7 @@
 | **Edition** | Interim, updated · 9 November 2026 (after the sandbox payout and the demo video) |
 | **Hackathon deadline** | Thursday 12 November 2026, 20:00 UK |
 | **Live demo** | https://fairshift-ai.onrender.com — Gemini on, PayPal payouts **off** |
+| **Demo video** | https://youtu.be/eb8OwmSrGuw (≈2 min 51 s) |
 | **Sources** | The repository (`SPEC.md` amendments 1–53, `TASKS.md`, 230 automated tests), the project owner's interim PDF report and context handoff, 21 user-supplied screenshots, and two screen recordings of the isolated sandbox environment (8 Nov) |
 
 > [!IMPORTANT]
@@ -364,7 +365,7 @@ These were found while combining the interim PDF/handoff with the repository. No
 **Done (8–9 Nov)**
 - ✅ Codespace set up, preflight passed, payout sent and confirmed (§7, E22–E30).
 - ✅ Batch badge no longer says "processing" after every item is paid.
-- ✅ Demo video finished (≈2 min 51 s, owner's voiceover): live public site, then the isolated sandbox payout, each scene labelled "LIVE SITE · payouts off" or "PAYPAL SANDBOX · isolated copy". Private details removed: browser tabs and address bars of the Codespace, a password-manager pop-up, the desktop, and bank/card names on the PayPal sandbox page. Two long clips (the hours correction, Sam's view) are fast-forwarded and some screens are held still so the narration lines up.
+- ✅ Demo video finished and published on YouTube — https://youtu.be/eb8OwmSrGuw (≈2 min 51 s, owner's voiceover): live public site, then the isolated sandbox payout, each scene labelled "LIVE SITE · payouts off" or "PAYPAL SANDBOX · isolated copy". Private details removed: browser tabs and address bars of the Codespace, a password-manager pop-up, the desktop, and bank/card names on the PayPal sandbox page. Two long clips (the hours correction, Sam's view) are fast-forwarded and some screens are held still so the narration lines up.
 
 **Statistics used in the pitch, with sources** (the problem card and voiceover):
 - 92% of hospitality workers want more information on how their tips are calculated — KAM Media for Tipjar, published May 2022 (before the law; a tipping-app survey). <https://www.thestaffcanteen.com/News/seven-out-of-ten-hospitality-workers-don-t-trust-that-they-are-paid-correct-tips>
