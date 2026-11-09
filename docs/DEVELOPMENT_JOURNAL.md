@@ -8,6 +8,7 @@
 | **Hackathon deadline** | Thursday 12 November 2026, 20:00 UK |
 | **Live demo** | https://fairshift-ai.onrender.com — Gemini on, PayPal payouts **off** |
 | **Demo video** | https://youtu.be/eb8OwmSrGuw (≈2 min 51 s) |
+| **Devpost** | https://devpost.com/software/fairshift-mvt7sh |
 | **Sources** | The repository (`SPEC.md` amendments 1–53, `TASKS.md`, 230 automated tests), the project owner's interim PDF report and context handoff, 21 user-supplied screenshots, and two screen recordings of the isolated sandbox environment (8 Nov) |
 
 > [!IMPORTANT]
