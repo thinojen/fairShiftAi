@@ -74,7 +74,7 @@ async function ShiftDetail({ params }: { params: PageProps<"/manager/shifts/[id]
             </Link>
             <span aria-hidden>·</span>
             <ShiftStatusBadge status={shift.status} />
-            {batch && <BatchStatusBadge status={batch.status} />}
+            {batch && <BatchStatusBadge status={batch.status} allItemsPaid={shift.status === "paid"} />}
           </span>
         }
       />
@@ -202,7 +202,7 @@ async function ShiftDetail({ params }: { params: PageProps<"/manager/shifts/[id]
               <div className="flex flex-col gap-4">
                 <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
                   <dt className="text-muted-foreground">Batch</dt>
-                  <dd><BatchStatusBadge status={batch.status} /></dd>
+                  <dd><BatchStatusBadge status={batch.status} allItemsPaid={shift.status === "paid"} /></dd>
                   <dt className="text-muted-foreground">sender_batch_id</dt>
                   <dd className="font-mono break-all">{batch.senderBatchId}</dd>
                   <dt className="text-muted-foreground">PayPal batch ID</dt>

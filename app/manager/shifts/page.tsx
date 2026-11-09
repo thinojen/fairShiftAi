@@ -62,7 +62,7 @@ async function ShiftList() {
                     <ShiftStatusBadge status={s.status} />
                   </td>
                   <td className="px-5 py-3.5">
-                    <BatchStatusBadge status={s.batchStatus} />
+                    <BatchStatusBadge status={s.batchStatus} allItemsPaid={s.status === "paid"} />
                   </td>
                   <td className="pr-4">
                     <ChevronRight className="text-muted-foreground size-4 transition-transform group-hover:translate-x-0.5" />

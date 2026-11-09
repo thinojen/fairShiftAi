@@ -42,8 +42,21 @@ const BATCH: Record<string, string> = {
   canceled: "Canceled",
 };
 
-export function BatchStatusBadge({ status }: { status: string | null }) {
+/**
+ * PayPal often still reports the batch header as PENDING/PROCESSING after every
+ * item has succeeded. `allItemsPaid` (the shift is "paid" only when EVERY item
+ * is PayPal SUCCESS with no reconciliation issue) lets the label say so, while
+ * PayPal's own batch status stays visible in the tooltip.
+ */
+export function BatchStatusBadge({ status, allItemsPaid = false }: { status: string | null; allItemsPaid?: boolean }) {
   if (!status) return <Badge variant="outline">No payout</Badge>;
+  if (allItemsPaid && status !== "error" && status !== "denied" && status !== "canceled") {
+    return (
+      <Badge variant="success" title={`PayPal batch status: ${BATCH[status] ?? status}`}>
+        All items paid
+      </Badge>
+    );
+  }
   const tone = status === "error" || status === "denied" ? "destructive" : status === "success" ? "success" : "secondary";
   return <Badge variant={tone}>{BATCH[status] ?? status}</Badge>;
 }

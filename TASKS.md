@@ -31,7 +31,7 @@ Legend: ✅ done & verified · 🟡 built, needs external credentials to verify 
 - ✅ PGlite integration tests (25) on the real migrations + seed
 - ✅ Local end-to-end browser run (real server actions over the Postgres wire protocol; wrong codes only, no PayPal calls)
 - 🟡 **Run `db-migrate` then `db-seed`** in GitHub Actions to apply `0001_milestone2.sql` to Supabase
-- 🟡 Real sandbox payout through the UI — only in a controlled environment (not the public Render demo)
+- ✅ Real sandbox payout through the UI — in the isolated Codespace (8 Nov, batch `TBMUQ4PFG2YKC`, all 5 items SUCCESS); never on the public Render demo
 - 🟡 Live Supabase + live PayPal for the dashboard flow — untested until deployed
 
 ## Pre-deploy hardening (Tue 3 Nov) ✅
@@ -85,8 +85,10 @@ Legend: ✅ done & verified · 🟡 built, needs external credentials to verify 
 - ✅ **Verified by user:** live Gemini explanation and pay-query workflow
 - ✅ Isolated Codespaces sandbox demo: local-only `demo:setup` (with Sam's accepted query), read-only `paypal:preflight`, banner, devcontainer, docs/SANDBOX_DEMO.md (SPEC 49–53). Rehearsed locally up to the Approve & pay form (not clicked; fake credentials)
 - ✅ Interim development journal with evidence archive: docs/DEVELOPMENT_JOURNAL.md (5 Nov)
-- 🟡 Create Codespace + secrets → `demo:setup` → `paypal:preflight` (online) → share results
-- 🟡 Real sandbox payout through the manager UI — **only after explicit approval**
+- ✅ Create Codespace + secrets → `demo:setup` → `paypal:preflight` (online) — all checks passed (8 Nov)
+- ✅ Real sandbox payout through the manager UI (8 Nov) — see docs/DEVELOPMENT_JOURNAL.md §7 and §5-K (incl. an accidental uncorrected first take)
+- ✅ Batch badge reads "All items paid" once every item is confirmed (was "Accepted · PayPal processing")
+- ⬜ Warn on Approve & pay when the shift has an accepted but uncorrected pay query
 - 🟡 Full `ai-check` again (or the unfinished scenarios only)
 - 🟡 Render: set `GEMINI_MODEL=gemini-3.5-flash-lite` in the dashboard (existing services keep their old value)
 - 🟡 **Run `ai-check`** (7 real scenarios)

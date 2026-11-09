@@ -4,19 +4,19 @@
 
 | | |
 |---|---|
-| **Edition** | Interim · 5 November 2026 (after commit `5f669ef`) |
+| **Edition** | Interim, updated · 9 November 2026 (after the sandbox payout recording) |
 | **Hackathon deadline** | Thursday 12 November 2026, 20:00 UK |
 | **Live demo** | https://fairshift-ai.onrender.com — Gemini on, PayPal payouts **off** |
-| **Sources** | The repository (14 commits, `SPEC.md` amendments 1–53, `TASKS.md`, 225 automated tests), the project owner's interim PDF report and context handoff, and 21 user-supplied screenshots |
+| **Sources** | The repository (`SPEC.md` amendments 1–53, `TASKS.md`, 230 automated tests), the project owner's interim PDF report and context handoff, 21 user-supplied screenshots, and two screen recordings of the isolated sandbox environment (8 Nov) |
 
 > [!IMPORTANT]
-> **Evidence boundary.** As of this edition, no payout has been sent through the FairShift **manager interface** to real PayPal. A separate £1.00 sandbox payout script succeeded on 3 November; the full five-worker manager-UI payout is prepared but **not run**. Nothing below should be read as claiming otherwise.
+> **Evidence boundary.** The public site has **never** sent a payout (payouts stay off there). On 8 November a five-worker payout was sent through the FairShift **manager interface** to the real PayPal **sandbox** — from a separate, isolated environment with synthetic data (Environment B, §7) — and every item reached SUCCESS (E22–E30). Sandbox money is not real money. An earlier, accidental take in the same environment also paid Sam £154.77 *without* his correction (§5-K); it is recorded here rather than hidden.
 
 **How to read the labels.** Every claim is tagged with the kind of evidence behind it:
 
 | Label | Meaning |
 |---|---|
-| 🖼️ **Observed** | Seen in a screenshot of the live site, GitHub Actions or Render (evidence `E01`–`E21`) |
+| 🖼️ **Observed** | Seen in a screenshot of the live site, GitHub Actions or Render (evidence `E01`–`E30`) |
 | 🌐 **Real call** | A real request to Gemini, PayPal sandbox or Supabase, shown in logs |
 | 🧪 **Automated test** | Repository tests on in-memory/local databases with **fake** Gemini/PayPal |
 | 🔧 **Code** | What the source code does (commit or file), not independently observed |
@@ -170,6 +170,23 @@ Commit times are UK time (GMT). Test counts are the repository's automated tests
 | ~01:38 | — | 🖼️ Query marked **Resolved** ("Completed"); clock-out still 23:30 (E21) — see §5-I | |
 | ~01:45 | — | Payout-readiness audit of the code (§7) | |
 | 02:09 | `5f669ef` | Isolated Codespaces payout demo: local-only `demo:setup`, read-only `paypal:preflight`, environment banner (§7) | 225 |
+| ~12:56 | `4e694df` | Interim development journal and evidence archive | |
+
+### Sunday 8 November — the real sandbox payout (Environment B)
+
+| Time | Commit | What happened | Tests |
+|---|---|---|---|
+| evening | — | Codespaces secrets created; Codespace started; `demo:db` → `demo:setup` → `paypal:preflight` all ✓. Manual checks confirmed by the owner: five recipients are **Personal GB** sandbox accounts; the business sandbox account held GBP 4,998.98; port 3000 **Private** | |
+| evening | `2f9abca` | **Fix:** Server Actions were refused through the Codespaces proxy (origin `localhost:3000` ≠ forwarded host). Allow exactly `localhost:3000` and this Codespace's own host, only inside a Codespace (§5-K) | |
+| evening | — | First take: **Approve & pay pressed before correcting Sam** → batch `4UE3CGULFJ3WL`, Sam 6h £154.77 (§5-K). Database reset for a clean take | |
+| ~23:08 | — | 🖼️ 🌐 Recorded take: correction 31 Oct 00:30 (flagged), query resolved, Save & lock, wrong code refused, **Approve & pay** → batch `TBMUQ4PFG2YKC`, Pending → Refresh → **all five items Paid** at 23:11 (E22–E27) | |
+| ~23:20 | — | 🖼️ 🌐 Sam's view: **Paid via PayPal £171.88**; Gemini explains −£94.58; Sam's sandbox PayPal account shows +£171.88 received (E28–E30) | |
+
+### Monday 9 November — tidy-up
+
+| Time | Commit | What happened | Tests |
+|---|---|---|---|
+| ~00:30 | (this commit) | **Fix:** the batch badge said *"Accepted · PayPal processing"* even after every item was confirmed paid. It now reads **"All items paid"** once the shift is paid, keeping PayPal's wording in a tooltip; errors are never overridden. Journal updated | 230 |
 
 ---
 
@@ -230,7 +247,18 @@ This is **by design** — accepting a query changes nothing; the manager must co
 | Gemini's "response mime type" wording wasn't recognised as a structured-output rejection | Extended the detector; fallback still only on an explicit rejection |
 | In the local end-to-end harness, our *mock* Gemini returned malformed tool calls | The new diagnostics pinpointed `EMPTY_RESPONSE` at "reading Gemini's response"; fixed the mock, and the label now reports HTTP 200 correctly |
 | Per-attempt AI diagnostics were being returned to the browser | Stripped server-side |
-| Next.js rejects Server Actions coming through a Codespaces forwarded URL | Allow exactly that Codespace's own host (no wildcard); Render unaffected |
+| Next.js rejects Server Actions coming through a Codespaces forwarded URL | Allow exactly that Codespace's own host (no wildcard); Render unaffected — but see §5-K for the second half of this bug |
+
+### K · Running the real sandbox payout (8 Nov)
+
+| Snag | What we did |
+|---|---|
+| `demo:db` failed with "container name already in use" after the Codespace restarted (container existed but was stopped) | `demo:db` now restarts an existing container before creating one |
+| The manager page showed "Couldn't load this page" for every failure, implying the database was broken | Rewrote the error page (plain wording + the error digest) and added `explainDemoError` so the demo scripts say *which* step to run (database not running → `demo:db`; tables missing → `demo:setup`) |
+| Every button failed in the Codespace. Server log: `x-forwarded-host … does not match origin localhost:3000` | The proxy forwards with origin `localhost:3000`; our first fix only allowed the Codespace host. `2f9abca` allows exactly those two, only when running in a Codespace. Verified by replaying the captured request: `localhost:3000` → 200, `https://evil.example` → rejected |
+| **Accidental first payout.** In the first take, **Approve & pay** was pressed before Sam's hours were corrected. PayPal accepted batch `4UE3CGULFJ3WL` and Sam received **£154.77** (uncorrected 6h) — later visible in his sandbox account (E30) | There is no "undo" for a payout, by design. Nothing was edited on PayPal. The Codespace database was reset and the take re-recorded. The safeguards did their job — the payout needed the code and the tick — but they cannot tell a *premature* approval from a correct one. Lesson: the approval screen should warn when a shift still has an **accepted, uncorrected pay query** (§9) |
+| After all five items were confirmed paid, the batch badge still said *"Accepted · PayPal processing"* (E27) | That was PayPal's batch-level status, shown verbatim. Fixed (9 Nov): once the shift is paid the badge reads **"All items paid"**, with PayPal's wording kept in the tooltip; error/denied/canceled are never overridden (4 new tests) |
+| The first Refresh said *"Status updated from PayPal (5 changes). Not everyone is paid yet."* (E26) | Correct behaviour: items had moved to PENDING, not SUCCESS, so nobody was shown as paid. A later Refresh showed all five Paid (E27) |
 
 ---
 
@@ -253,7 +281,10 @@ This is **by design** — accepting a query changes nothing; the manager must co
 | 225 automated tests, typecheck, lint, build | ✅ Reported | 🧪 local runs at `5f669ef` |
 | Full payout sequence with a **fake** PayPal (correct → lock → pay once → refresh → Sam paid; UNCLAIMED → Needs review) | ✅ Simulated | 🧪 `tests/demo-sandbox.test.ts` |
 | Codespaces demo mode up to the Approve & pay form (fake credentials, **not clicked**) | ✅ Local rehearsal | 🧪 L01, L02 |
-| **Five-worker payout through the manager UI → real PayPal sandbox → Refresh → Sam "Paid"** | ⛔ **NOT RUN** | 📝 needs Codespace setup, preflight review and explicit approval |
+| **Five-worker payout through the manager UI → real PayPal sandbox → Refresh → Sam "Paid"** (Environment B, synthetic data) | ✅ **PASS** — batch `TBMUQ4PFG2YKC`, 1 send attempt, all 5 items SUCCESS | 🖼️ 🌐 E22–E27 (8 Nov, 23:08 recording) |
+| Sam sees "Paid via PayPal £171.88"; Gemini explains −£94.58 after the correction (Environment B) | ✅ PASS | 🖼️ 🌐 E28, E29 |
+| Money arrives in Sam's PayPal **sandbox** account | ✅ +£171.88 received (plus £154.77 from the accidental first take, §5-K) | 🖼️ 🌐 E30 |
+| The same payout on the **public** site | — Not applicable: payouts stay **off** there by design | 🔧 `PAYOUTS_ENABLED=false` on Render |
 | Webhook-driven payout status | ⛔ Not implemented | 🔧 status comes from "Refresh status" |
 | Separately authorised pay-query correction payouts | ⛔ Not implemented | 🔧 only an unused `correction_payout_id` column |
 
@@ -279,7 +310,7 @@ Sending a real batch from the public site would lock Sam's 30 Oct shift permanen
 | Payouts | **Off** | On, sandbox only, approval code required |
 | Data | Sam's −£111.69 story and resolved query, preserved | Fresh synthetic seed; resettable for each take |
 | Label in the video | Public URL | Yellow banner: *"Isolated sandbox environment · synthetic data · PayPal SANDBOX"* (L01) |
-| Status | ✅ Live | 📝 Code pushed (`5f669ef`); Codespace not yet created |
+| Status | ✅ Live | ✅ Payout sent and confirmed, 8 Nov (E22–E30) |
 
 **Safety built into Environment B (🔧 + 🧪):** `demo:setup`, `paypal:preflight` and `demo:app` refuse any database that isn't `localhost`; the preflight uses a read-only connection and only requests a sandbox sign-in token (no money); it checks the sandbox URL, credentials and Payouts permission, all five recipients, the exact batch against the caps, no existing batch, and the history protections — and it lists what only a human can check (Personal sandbox accounts, GBP, business balance, private port).
 
@@ -295,6 +326,16 @@ Sending a real batch from the public site would lock Sam's 30 Oct shift permanen
 | **Total** | **£510.00** | **£510.00** |
 
 The pool is fixed, so Sam's extra hour slightly reduces everyone else's share. Largest item £171.88 ≤ £200 cap; batch £510 ≤ £1,000 cap.
+
+### The actual batch (🖼️ 🌐 PayPal sandbox, 8 Nov — E25–E27)
+
+| | |
+|---|---|
+| PayPal batch ID | `TBMUQ4PFG2YKC` |
+| `sender_batch_id` | `fs_sh_2026-10-30_dinner_c76795a3c9d2` (also sent as `PayPal-Request-Id`) |
+| Send attempts | 1 |
+| Items | Sam £171.88 · Priya £122.77 · Casey £73.66 · Jordan £73.66 · Alex £68.03 = **£510.00** — exactly the projection above |
+| Status path | Pending → Refresh: "5 changes, not everyone is paid yet" → Refresh: **every item Paid**, "Every worker's payout has succeeded" (last checked 8 Nov 23:11) |
 
 ---
 
@@ -312,23 +353,25 @@ These were found while combining the interim PDF/handoff with the repository. No
 | 6 | Who recorded 6 Nov clock times | "Supplied clock times before the shift" | The seed never sets them; E13 shows times for two staff | Entered on the live site after seeding; the production audit log (`hours.corrected`) would show by whom — not checked |
 | 7 | Early milestones | Summarised as "built in milestones" | Commits `4d2420d`–`8f4cf3c` and the OAuth-scope fix `4e2dc00` | Added to §4 and §5-A |
 | 8 | Starter spec | "The Garden Bistro", OpenAI | Live demo: The Copper Lantern, Gemini | Scope evolved; the starter spec was initial intent |
+| 9 | Sam's sandbox PayPal balance | — | E30: balance £1,001.00, while recent activity lists +£171.88, +£154.77, +£1.00 and a +£5,000.00 transfer | Not explained; the sandbox may count transfers or holds differently. FairShift's evidence is the per-item SUCCESS status and the received lines, not the balance |
 
 ---
 
 ## 9. Open issues and next steps
 
-**Before the payout recording**
-1. 📝 Create Codespaces secrets (not Actions Variables; never `DATABASE_URL`) → create the Codespace → `demo:db`, `demo:setup`, `paypal:preflight` → review results, including the manual checks.
-2. 📝 Correct Sam to 00:30, resolve, **Save & lock**, re-run the preflight on the locked amounts.
-3. 📝 Only with explicit approval: one **Approve & pay**, then **Refresh status** until each item has a final PayPal status. Show whatever PayPal reports; never present pending or unclaimed as paid.
+**Done (8–9 Nov)**
+- ✅ Codespace set up, preflight passed, payout sent and confirmed (§7, E22–E30).
+- ✅ Batch badge no longer says "processing" after every item is paid.
+- ✅ Demo video edited from the recordings (two labelled parts; Gmail pop-up and desktop cut out).
 
 **Product polish (small, worthwhile)**
-4. Rename or explain **Resolved** when the claim was accepted but hours weren't corrected (e.g. "Closed — no change to records" vs "Closed — records corrected").
-5. Make the AI's manager summary describe claims as claims: *"Worker claims an extra hour after the recorded clock-out."*
-6. Re-run the full 7-scenario `ai-check` now that retries exist (or run the unfinished scenarios individually).
+1. **Warn before paying a shift with an accepted, uncorrected pay query** — the accidental first take (§5-K) shows the approval form can't tell a premature approval from a correct one.
+2. Rename or explain **Resolved** when the claim was accepted but hours weren't corrected (e.g. "Closed — no change to records" vs "Closed — records corrected").
+3. Make the AI's manager summary describe claims as claims: *"Worker claims an extra hour after the recorded clock-out."*
+4. Re-run the full 7-scenario `ai-check` now that retries exist (or run the unfinished scenarios individually).
 
 **Submission**
-7. Record the video in two clearly labelled parts (public ≈ 60 s, isolated ≈ 90 s), finish the README and Devpost text, then stop/delete the Codespace to protect the free allowance.
+5. Finish the README and Devpost text, then stop/delete the Codespace to protect the free allowance.
 
 **Never:** enable payouts on the public site, reseed or reset Supabase, or present a simulated payment as real.
 
@@ -430,12 +473,49 @@ Sandbox environment, client-credential auth, Payouts permission, 5 masked allowl
 **L02 · 5 Nov · After the 00:30 correction and Save & lock, "Approve & pay" is available (£510.00 to 5 workers) — not clicked**
 ![L02](journal/l02-local-approve-form-available.jpg)
 
+### The real sandbox payout (🌐 Environment B · isolated Codespace · synthetic data · 8 Nov)
+
+Frames taken from the owner's screen recordings. The browser address bar is cropped from every frame (it showed the private Codespace URL); the yellow *"Isolated sandbox environment"* banner is visible where the page top is in view.
+
+**E22 · Correction recorded: Sam's clock-out → 31 Oct 00:30, and the change is flagged**
+"Sam Okafor's clock times differ from the rota by more than 30 minutes" · "The original value is kept as evidence."
+![E22](journal/e22-sandbox-correction-flagged.jpg)
+
+**E23 · Recalculated preview: Sam 7h → £171.88; pool still £510.00**
+![E23](journal/e23-sandbox-recalculated-preview.jpg)
+
+**E24 · Locked allocation; a wrong approval code is refused — "Nothing was sent."**
+![E24](journal/e24-sandbox-wrong-code-refused.jpg)
+
+**E25 · Approved: batch `TBMUQ4PFG2YKC`, every item Pending (not Paid)**
+![E25](journal/e25-sandbox-batch-pending.jpg)
+
+**E26 · First Refresh: "5 changes. Not everyone is paid yet."**
+![E26](journal/e26-sandbox-refresh-not-all-paid.jpg)
+
+**E27 · Second Refresh: every item Paid — "Every worker's payout has succeeded."**
+The batch badge still reads "Accepted · PayPal processing" — fixed on 9 Nov (§5-K).
+![E27](journal/e27-sandbox-all-items-paid.jpg)
+
+**E28 · Sam's dashboard: Paid via PayPal £171.88; −£94.58 vs 23 Oct**
+![E28](journal/e28-sandbox-sam-paid-via-paypal.jpg)
+
+**E29 · Gemini explains the −£94.58: pool −£54.13, his hours −£8.50, the team −£31.95**
+![E29](journal/e29-sandbox-gemini-explains-94-58.jpg)
+
+**E30 · Sam's PayPal sandbox account: +£171.88 received (8 Nov)**
+The +£154.77 line is the accidental first take (§5-K). Cropped to the activity list.
+![E30](journal/e30-paypal-sandbox-sam-received.jpg)
+
 ### Screen recordings (kept outside the repository)
 
 - *Screen Recording 2026-11-04 at 23.38.35* — ~2 min, early manager/shift interactions
 - *Screen Recording 2026-11-05 at 00.49.12* — ~13 s, pay-query proposal
 - *Screen Recording 2026-11-05 at 01.10.46* — ~17 s, Gemini/dispute workflow
+- *Screen Recording 2026-11-08 at 23.08.31* — ~2.5 min, the sandbox payout (E22–E27). The publishable copy cuts a browser "save password" pop-up (≈2 s) and crops the address bar
+- *Screen Recording 2026-11-08 at 23.20.18* — ~47 s, Sam's view and PayPal (E28–E30). The publishable copy ends before the desktop appears
+- The edited demo video (≈2 min 13 s) is built from these and the E14–E18 screenshots
 
 ---
 
-*Provenance: this journal combines the repository (commits, `SPEC.md`, `TASKS.md`, tests), the project owner's interim report and handoff (5 Nov 2026), and the screenshots above. It is a curated record, not a full chat export. The final edition will be written after the isolated sandbox payout and the submission.*
+*Provenance: this journal combines the repository (commits, `SPEC.md`, `TASKS.md`, tests), the project owner's interim report and handoff (5 Nov 2026), and the screenshots and recordings above. It is a curated record, not a full chat export. The final edition will be written after the submission.*

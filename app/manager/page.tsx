@@ -85,7 +85,7 @@ async function Overview() {
                   <span className="text-sm font-semibold tabular-nums">{formatGBP(s.grossPence)}</span>
                   {s.isDemoPool && <DemoPoolBadge />}
                   <ShiftStatusBadge status={s.status} />
-                  {s.batchStatus && <BatchStatusBadge status={s.batchStatus} />}
+                  {s.batchStatus && <BatchStatusBadge status={s.batchStatus} allItemsPaid={s.status === "paid"} />}
                 </Link>
               </li>
             ))}
