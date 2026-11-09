@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **Edition** | Interim, updated · 9 November 2026 (after the sandbox payout recording) |
+| **Edition** | Interim, updated · 9 November 2026 (after the sandbox payout and the demo video) |
 | **Hackathon deadline** | Thursday 12 November 2026, 20:00 UK |
 | **Live demo** | https://fairshift-ai.onrender.com — Gemini on, PayPal payouts **off** |
 | **Sources** | The repository (`SPEC.md` amendments 1–53, `TASKS.md`, 230 automated tests), the project owner's interim PDF report and context handoff, 21 user-supplied screenshots, and two screen recordings of the isolated sandbox environment (8 Nov) |
@@ -186,7 +186,9 @@ Commit times are UK time (GMT). Test counts are the repository's automated tests
 
 | Time | Commit | What happened | Tests |
 |---|---|---|---|
-| ~00:30 | (this commit) | **Fix:** the batch badge said *"Accepted · PayPal processing"* even after every item was confirmed paid. It now reads **"All items paid"** once the shift is paid, keeping PayPal's wording in a tooltip; errors are never overridden. Journal updated | 230 |
+| ~00:30 | `c537343` | **Fix:** the batch badge said *"Accepted · PayPal processing"* even after every item was confirmed paid. It now reads **"All items paid"** once the shift is paid, keeping PayPal's wording in a tooltip; errors are never overridden. Journal updated | 230 |
+| ~02:44 | — | 🖼️ 🌐 Live-site walkthrough recorded on fairshift-ai.onrender.com (overview, staff, tip policy, Priya's and Sam's dashboards, pay queries) — looked only, changed nothing | |
+| afternoon | — | Demo video finished: problem card with sourced statistics (§9), live-site part, sandbox payout part, voiceover by the project owner synced section by section (≈2 min 51 s) | |
 
 ---
 
@@ -362,7 +364,13 @@ These were found while combining the interim PDF/handoff with the repository. No
 **Done (8–9 Nov)**
 - ✅ Codespace set up, preflight passed, payout sent and confirmed (§7, E22–E30).
 - ✅ Batch badge no longer says "processing" after every item is paid.
-- ✅ Demo video edited from the recordings (two labelled parts; Gmail pop-up and desktop cut out).
+- ✅ Demo video finished (≈2 min 51 s, owner's voiceover): live public site, then the isolated sandbox payout, each scene labelled "LIVE SITE · payouts off" or "PAYPAL SANDBOX · isolated copy". Private details removed: browser tabs and address bars of the Codespace, a password-manager pop-up, the desktop, and bank/card names on the PayPal sandbox page. Two long clips (the hours correction, Sam's view) are fast-forwarded and some screens are held still so the narration lines up.
+
+**Statistics used in the pitch, with sources** (the problem card and voiceover):
+- 92% of hospitality workers want more information on how their tips are calculated — KAM Media for Tipjar, published May 2022 (before the law; a tipping-app survey). <https://www.thestaffcanteen.com/News/seven-out-of-ten-hospitality-workers-don-t-trust-that-they-are-paid-correct-tips>
+- More than 2 million workers covered; ≈ £200 million a year back to staff — UK Government estimate, 2 May 2023. <https://www.gov.uk/government/news/millions-to-take-home-more-cash-as-new-law-on-tipping-passes>
+- A quarter of employers made no changes a year after the law — URocked research (250 staff, 150 decision-makers, 1,000 consumers), Oct 2025. <https://www.restaurantonline.co.uk/Article/2025/10/01/half-of-consumers-still-dont-trust-restaurants-to-pass-on-tips-according-to-new-research>
+- The Act came into force on 1 October 2024. <https://dwfgroup.com/en/news-and-insights/insights/2024/8/new-law-preventing-employers-withholding-tips-in-force-from-1-october-2024>
 
 **Product polish (small, worthwhile)**
 1. **Warn before paying a shift with an accepted, uncorrected pay query** — the accidental first take (§5-K) shows the approval form can't tell a premature approval from a correct one.
@@ -514,7 +522,8 @@ The +£154.77 line is the accidental first take (§5-K). Cropped to the activity
 - *Screen Recording 2026-11-05 at 01.10.46* — ~17 s, Gemini/dispute workflow
 - *Screen Recording 2026-11-08 at 23.08.31* — ~2.5 min, the sandbox payout (E22–E27). The publishable copy cuts a browser "save password" pop-up (≈2 s) and crops the address bar
 - *Screen Recording 2026-11-08 at 23.20.18* — ~47 s, Sam's view and PayPal (E28–E30). The publishable copy ends before the desktop appears
-- The edited demo video (≈2 min 13 s) is built from these and the E14–E18 screenshots
+- *Screen Recording 2026-11-09 at 02.44.25* — ~70 s, live-site walkthrough (public site, read-only). The final seconds show the desktop and are not used
+- The final demo video (≈2 min 51 s) is built from the 05.11 01.10.46, 08.11 and 09.11 recordings plus title, problem and closing cards, with the owner's voiceover
 
 ---
 

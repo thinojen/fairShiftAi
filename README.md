@@ -52,7 +52,7 @@ Next.js 16 · TypeScript · Tailwind + shadcn/ui · Drizzle ORM · Supabase Post
 | API | Use | Status |
 |---|---|---|
 | OAuth2 | client-credentials token, cached | ✅ built |
-| Payouts v1 | batch payouts to workers; per-item status lookups | ✅ £1.00 sandbox payout verified · dashboard flow built |
+| Payouts v1 | batch payouts to workers; per-item status lookups | ✅ five-worker payout through the manager UI verified in the isolated sandbox environment (batch `TBMUQ4PFG2YKC`, all items SUCCESS — [evidence](docs/DEVELOPMENT_JOURNAL.md#7-the-paypal-payout-readiness-and-the-isolated-environment)) · never enabled on the public demo |
 | Webhooks | signature verification + duplicate-safe event storage | 🟡 verification built; applying events to payouts is next (manual Refresh status works now) |
 | Orders v2 | funding the tip pool | ⬜ planned |
 
